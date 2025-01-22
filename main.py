@@ -9,6 +9,7 @@ client = Client(account_sid, auth_token)
 twilio_phone_number = '+18445801151'
 
 
+
 def send_message(from_number, to_number, message):
     """
     Sends a message using Twilio.
