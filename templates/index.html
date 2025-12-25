@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMS Dashboard - PNYC</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1><i class="fas fa-sms"></i> SMS Dashboard</h1>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-view="dashboard">
+                    <i class="fas fa-home"></i> Dashboard
+                </a>
+                <a href="#" class="nav-item" data-view="conversations">
+                    <i class="fas fa-comments"></i> Conversations
+                </a>
+                <a href="#" class="nav-item" data-view="contacts">
+                    <i class="fas fa-address-book"></i> Contacts
+                </a>
+                <a href="#" class="nav-item" data-view="compose">
+                    <i class="fas fa-paper-plane"></i> Send Message
+                </a>
+                <a href="#" class="nav-item" data-view="scheduled">
+                    <i class="fas fa-clock"></i> Scheduled
+                </a>
+                <a href="#" class="nav-item" data-view="templates">
+                    <i class="fas fa-file-alt"></i> Templates
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard View -->
+            <section id="dashboard-view" class="view active">
+                <div class="view-header">
+                    <h2>Dashboard</h2>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-users"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-contacts">0</span>
+                            <span class="stat-label">Total Contacts</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-envelope"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-total">0</span>
+                            <span class="stat-label">Total Messages</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-arrow-up"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-sent">0</span>
+                            <span class="stat-label">Sent</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-arrow-down"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-received">0</span>
+                            <span class="stat-label">Received</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="recent-section">
+                    <h3>Recent Messages</h3>
+                    <div class="message-list" id="recent-messages"></div>
+                </div>
+            </section>
+
+            <!-- Conversations View -->
+            <section id="conversations-view" class="view">
+                <div class="view-header">
+                    <h2>Conversations</h2>
+                </div>
+                <div class="conversations-container">
+                    <div class="conversation-list" id="conversation-list"></div>
+                    <div class="conversation-panel" id="conversation-panel">
+                        <div class="conversation-header" id="conversation-header">
+                            <span>Select a conversation</span>
+                        </div>
+                        <div class="conversation-messages" id="conversation-messages"></div>
+                        <div class="conversation-reply" id="conversation-reply" style="display: none;">
+                            <textarea id="reply-input" placeholder="Type your reply..."></textarea>
+                            <button class="btn btn-primary" id="send-reply">
+                                <i class="fas fa-paper-plane"></i> Send
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Contacts View -->
+            <section id="contacts-view" class="view">
+                <div class="view-header">
+                    <h2>Contacts <small style="color: var(--text-secondary); font-weight: normal;">(Live from Leads DB)</small></h2>
+                    <div class="view-actions">
+                        <input type="text" id="contact-search" placeholder="Search contacts..." class="search-input">
+                        <label class="checkbox-label" style="margin-left: 12px;">
+                            <input type="checkbox" id="mobile-only-filter" checked> Mobile only
+                        </label>
+                    </div>
+                </div>
+                <div class="contacts-table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="select-all-contacts"></th>
+                                <th>Name</th>
+                                <th>Phone</th>
+                                <th>Company</th>
+                                <th>Role</th>
+                                <th>Source</th>
+                            </tr>
+                        </thead>
+                        <tbody id="contacts-table-body"></tbody>
+                    </table>
+                </div>
+                <div class="pagination" id="contacts-pagination" style="margin-top: 16px; text-align: center;"></div>
+            </section>
+
+            <!-- Compose View -->
+            <section id="compose-view" class="view">
+                <div class="view-header">
+                    <h2>Send Message</h2>
+                </div>
+                <div class="compose-form">
+                    <div class="form-group">
+                        <label>Recipients</label>
+                        <div class="recipient-options">
+                            <label class="radio-label">
+                                <input type="radio" name="recipient-type" value="all" checked> All Contacts
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="recipient-type" value="selected"> Selected Contacts
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="recipient-type" value="single"> Single Number
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group" id="single-number-group" style="display: none;">
+                        <label for="single-number">Phone Number</label>
+                        <input type="tel" id="single-number" placeholder="+1234567890">
+                    </div>
+                    <div class="form-group" id="selected-contacts-group" style="display: none;">
+                        <label>Select Contacts</label>
+                        <div class="contact-selector" id="contact-selector"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="message-template">Template</label>
+                        <select id="message-template">
+                            <option value="">-- Select Template --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="message-body">Message</label>
+                        <textarea id="message-body" rows="5" placeholder="Enter your message..."></textarea>
+                        <span class="char-count"><span id="char-count">0</span>/160 characters</span>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="schedule-message"> Schedule for later
+                        </label>
+                    </div>
+                    <div class="form-group" id="schedule-group" style="display: none;">
+                        <label for="schedule-name">Campaign Name</label>
+                        <input type="text" id="schedule-name" placeholder="e.g., Weekly Permit Update">
+                        <label for="schedule-datetime">Send Date & Time</label>
+                        <input type="datetime-local" id="schedule-datetime">
+                    </div>
+                    <div class="form-actions">
+                        <button class="btn btn-primary btn-lg" id="send-message-btn">
+                            <i class="fas fa-paper-plane"></i> Send Now
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Scheduled View -->
+            <section id="scheduled-view" class="view">
+                <div class="view-header">
+                    <h2>Scheduled Messages</h2>
+                </div>
+                <div class="scheduled-list" id="scheduled-list"></div>
+            </section>
+
+            <!-- Templates View -->
+            <section id="templates-view" class="view">
+                <div class="view-header">
+                    <h2>Message Templates</h2>
+                    <button class="btn btn-primary" id="add-template-btn">
+                        <i class="fas fa-plus"></i> New Template
+                    </button>
+                </div>
+                <div class="templates-list" id="templates-list"></div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal" id="template-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>New Template</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="template-form">
+                    <div class="form-group">
+                        <label for="template-name">Template Name</label>
+                        <input type="text" id="template-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="template-body">Message Body</label>
+                        <textarea id="template-body" rows="5" required></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="save-template-btn">Save Template</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast"></div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
