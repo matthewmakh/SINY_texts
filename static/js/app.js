@@ -343,6 +343,10 @@ function renderContactsPagination() {
 
 // ============ Compose ============
 // ============ Compose ============
+
+// SAFETY: Maximum recipients
+const MAX_RECIPIENTS = 50;
+
 async function loadComposeView() {
     // Load contacts for selector (mobile only for SMS)
     const response = await API.get('/contacts?mobile_only=true&limit=500');
@@ -355,7 +359,7 @@ async function loadComposeView() {
     const selector = document.getElementById('contact-selector');
     selector.innerHTML = contacts.map(c => `
         <label class="contact-checkbox">
-            <input type="checkbox" value="${c.phone}">
+            <input type="checkbox" value="${c.phone}" onchange="updateSelectedCount()">
             ${c.name || c.phone} ${c.role ? `(${c.role})` : ''}
         </label>
     `).join('');
@@ -364,6 +368,17 @@ async function loadComposeView() {
     const templateSelect = document.getElementById('message-template');
     templateSelect.innerHTML = '<option value="">-- Select Template --</option>' +
         state.templates.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+    
+    updateSelectedCount();
+}
+
+function updateSelectedCount() {
+    const selected = document.querySelectorAll('#contact-selector input:checked').length;
+    const countEl = document.getElementById('selected-count');
+    if (countEl) {
+        countEl.textContent = `(${selected} selected, max ${MAX_RECIPIENTS})`;
+        countEl.style.color = selected > MAX_RECIPIENTS ? '#dc2626' : 'var(--text-secondary)';
+    }
 }
 
 async function sendMessage() {
@@ -376,8 +391,35 @@ async function sendMessage() {
         return;
     }
     
+    // SAFETY: Get phone numbers based on selection
+    let phoneNumbers = [];
+    
+    if (recipientType === 'single') {
+        const phone = document.getElementById('single-number').value.trim();
+        if (!phone) {
+            showToast('Please enter a phone number', 'error');
+            return;
+        }
+        phoneNumbers = [phone];
+    } else if (recipientType === 'selected') {
+        phoneNumbers = Array.from(
+            document.querySelectorAll('#contact-selector input:checked')
+        ).map(cb => cb.value);
+        
+        if (phoneNumbers.length === 0) {
+            showToast('Please select at least one contact', 'error');
+            return;
+        }
+    }
+    
+    // SAFETY: Check recipient count
+    if (phoneNumbers.length > MAX_RECIPIENTS) {
+        showToast(`SAFETY: Too many recipients (${phoneNumbers.length}). Maximum is ${MAX_RECIPIENTS}.`, 'error');
+        return;
+    }
+    
     if (isScheduled) {
-        // Schedule message
+        // Schedule message - REQUIRES phone_numbers
         const name = document.getElementById('schedule-name').value.trim();
         const datetime = document.getElementById('schedule-datetime').value;
         
@@ -386,14 +428,24 @@ async function sendMessage() {
             return;
         }
         
+        if (phoneNumbers.length === 0) {
+            showToast('SAFETY: You must select specific recipients to schedule a message', 'error');
+            return;
+        }
+        
+        // SAFETY: Confirmation for scheduling
+        const confirmed = confirm(`Schedule message to ${phoneNumbers.length} recipient(s)?\\n\\nThis will send at: ${new Date(datetime).toLocaleString()}`);
+        if (!confirmed) return;
+        
         const response = await API.post('/scheduled', {
             name,
             body,
-            scheduled_at: new Date(datetime).toISOString()
+            scheduled_at: new Date(datetime).toISOString(),
+            phone_numbers: phoneNumbers  // REQUIRED
         });
         
         if (response.success) {
-            showToast('Message scheduled');
+            showToast(`Message scheduled to ${phoneNumbers.length} recipients`);
             document.getElementById('message-body').value = '';
             document.getElementById('schedule-name').value = '';
             document.getElementById('schedule-datetime').value = '';
@@ -403,38 +455,18 @@ async function sendMessage() {
         return;
     }
     
-    // Send now
+    // Send now - confirmation for bulk
+    if (phoneNumbers.length > 1) {
+        const confirmed = confirm(`Send message to ${phoneNumbers.length} recipient(s) NOW?`);
+        if (!confirmed) return;
+    }
+    
     let response;
     
-    if (recipientType === 'single') {
-        const phone = document.getElementById('single-number').value.trim();
-        if (!phone) {
-            showToast('Please enter a phone number', 'error');
-            return;
-        }
-        response = await API.post('/messages/send', { to: phone, body });
-    } else if (recipientType === 'selected') {
-        // Get selected phone numbers (checkboxes now have phone values)
-        const selectedPhones = Array.from(
-            document.querySelectorAll('#contact-selector input:checked')
-        ).map(cb => cb.value);
-        
-        if (selectedPhones.length === 0) {
-            showToast('Please select at least one contact', 'error');
-            return;
-        }
-        response = await API.post('/messages/bulk', { phone_numbers: selectedPhones, body });
+    if (phoneNumbers.length === 1) {
+        response = await API.post('/messages/send', { to: phoneNumbers[0], body });
     } else {
-        // All contacts - get all phone numbers from checkboxes
-        const allPhones = Array.from(
-            document.querySelectorAll('#contact-selector input')
-        ).map(cb => cb.value);
-        
-        if (allPhones.length === 0) {
-            showToast('No contacts to send to', 'error');
-            return;
-        }
-        response = await API.post('/messages/bulk', { phone_numbers: allPhones, body });
+        response = await API.post('/messages/bulk', { phone_numbers: phoneNumbers, body });
     }
     
     if (response.success) {
@@ -629,6 +661,11 @@ function initEventListeners() {
                 e.target.value === 'selected' ? 'block' : 'none';
         });
     });
+    
+    // Initialize visibility based on default selection
+    const defaultType = document.querySelector('input[name="recipient-type"]:checked')?.value || 'selected';
+    document.getElementById('single-number-group').style.display = defaultType === 'single' ? 'block' : 'none';
+    document.getElementById('selected-contacts-group').style.display = defaultType === 'selected' ? 'block' : 'none';
     
     // Schedule toggle
     document.getElementById('schedule-message').addEventListener('change', (e) => {

@@ -212,23 +212,35 @@ def get_scheduled():
 
 @app.route('/api/scheduled', methods=['POST'])
 def schedule_message():
-    """Schedule a new bulk message"""
+    """Schedule a new bulk message - REQUIRES explicit phone numbers"""
     data = request.json
     name = data.get('name')
     body = data.get('body')
     scheduled_at = data.get('scheduled_at')
-    contact_ids = data.get('contact_ids')
+    phone_numbers = data.get('phone_numbers', [])  # MUST be provided
     
+    # SAFETY: Require all fields including phone_numbers
     if not all([name, body, scheduled_at]):
         return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+    
+    # SAFETY: REQUIRE phone_numbers - never allow empty
+    if not phone_numbers or len(phone_numbers) == 0:
+        return jsonify({'success': False, 'error': 'SAFETY: You must select specific recipients. Cannot schedule without phone_numbers.'}), 400
+    
+    # SAFETY: Cap at 50 recipients
+    if len(phone_numbers) > 50:
+        return jsonify({'success': False, 'error': f'SAFETY: Too many recipients ({len(phone_numbers)}). Maximum is 50 per scheduled message.'}), 400
     
     try:
         scheduled_dt = datetime.fromisoformat(scheduled_at.replace('Z', '+00:00'))
     except:
         return jsonify({'success': False, 'error': 'Invalid date format'}), 400
     
-    result = message_scheduler.schedule_bulk_message(name, body, scheduled_dt, contact_ids)
-    return jsonify({'success': True, 'scheduled': result})
+    try:
+        result = message_scheduler.schedule_bulk_message(name, body, scheduled_dt, phone_numbers)
+        return jsonify({'success': True, 'scheduled': result})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 
 @app.route('/api/scheduled/<int:message_id>', methods=['DELETE'])

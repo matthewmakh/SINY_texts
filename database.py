@@ -85,24 +85,34 @@ class Message(Base):
 
 
 class ScheduledBulkMessage(Base):
-    """Bulk message scheduling"""
+    """Bulk message scheduling - ONLY sends to explicitly specified recipients"""
     __tablename__ = 'scheduled_bulk_messages'
     
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
     body = Column(Text, nullable=False)
+    # Store the exact phone numbers to send to (JSON array)
+    # This is CRITICAL for safety - we NEVER send to "all contacts"
+    recipient_phones = Column(Text, nullable=False)  # JSON array of phone numbers
     scheduled_at = Column(DateTime, nullable=False)
-    status = Column(String(20), default='pending')  # pending, in_progress, completed, cancelled
+    status = Column(String(20), default='pending')  # pending, in_progress, completed, cancelled, failed
     total_recipients = Column(Integer, default=0)
     sent_count = Column(Integer, default=0)
     failed_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     def to_dict(self):
+        import json
+        phones = []
+        try:
+            phones = json.loads(self.recipient_phones) if self.recipient_phones else []
+        except:
+            pass
         return {
             'id': self.id,
             'name': self.name,
             'body': self.body,
+            'recipient_count': len(phones),
             'scheduled_at': self.scheduled_at.isoformat() if self.scheduled_at else None,
             'status': self.status,
             'total_recipients': self.total_recipients,
