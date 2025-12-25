@@ -20,6 +20,11 @@ class TwilioService:
         # Only use status callback if we have a real URL (not localhost)
         webhook_url = Config.WEBHOOK_BASE_URL
         if webhook_url and 'localhost' not in webhook_url and '127.0.0.1' not in webhook_url:
+            # Ensure URL has https:// prefix
+            if not webhook_url.startswith('http://') and not webhook_url.startswith('https://'):
+                webhook_url = f"https://{webhook_url}"
+            # Remove trailing slash if present
+            webhook_url = webhook_url.rstrip('/')
             self.status_callback_url = f"{webhook_url}/api/webhook/status"
             logger.info(f"Status callbacks enabled: {self.status_callback_url}")
         else:
