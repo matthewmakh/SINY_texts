@@ -349,6 +349,22 @@ body {
 .conversation-contact {
     font-weight: 600;
     margin-bottom: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.conversation-contact .contact-name {
+    font-weight: 600;
+}
+
+.conversation-contact .contact-phone {
+    font-weight: normal;
+}
+
+.conversation-contact .contact-phone.small {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
 }
 
 .conversation-preview {

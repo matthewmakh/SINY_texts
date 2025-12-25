@@ -194,13 +194,19 @@ function renderConversationList() {
         return;
     }
     
-    container.innerHTML = state.conversations.map(conv => `
-        <div class="conversation-item" data-phone="${conv.phone_number}">
+    container.innerHTML = state.conversations.map(conv => {
+        const name = conv.contact?.name;
+        const phone = conv.phone_number;
+        return `
+        <div class="conversation-item" data-phone="${phone}">
             <span class="conversation-time">${formatDate(conv.last_message.created_at)}</span>
-            <div class="conversation-contact">${conv.contact?.name || conv.phone_number}</div>
+            <div class="conversation-contact">
+                ${name ? `<span class="contact-name">${name}</span>` : ''}
+                <span class="contact-phone ${name ? 'small' : ''}">${phone}</span>
+            </div>
             <div class="conversation-preview">${conv.last_message.body}</div>
         </div>
-    `).join('');
+    `}).join('');
     
     // Add click handlers
     container.querySelectorAll('.conversation-item').forEach(item => {
@@ -224,13 +230,12 @@ async function loadConversation(phone) {
 function renderConversationMessages(messages, phone) {
     // Find contact name
     const conv = state.conversations.find(c => c.phone_number === phone);
-    const name = conv?.contact?.name || phone;
+    const name = conv?.contact?.name;
     
-    // Update header
-    document.getElementById('conversation-header').innerHTML = `
-        <strong>${name}</strong>
-        <small style="color: var(--text-secondary); margin-left: 12px;">${phone}</small>
-    `;
+    // Update header - show name prominently with phone smaller
+    document.getElementById('conversation-header').innerHTML = name 
+        ? `<strong>${name}</strong><small style="color: var(--text-secondary); margin-left: 12px; font-weight: normal;">${phone}</small>`
+        : `<strong>${phone}</strong>`;
     
     // Render messages
     const container = document.getElementById('conversation-messages');
