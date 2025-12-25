@@ -1,10 +1,14 @@
 from datetime import datetime
+import os
+import logging
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 
 from config import Config
 from database import get_session, Message, MessageStatus, MessageDirection
 from leads_service import get_contact_by_phone, get_contacts_by_phones
+
+logger = logging.getLogger(__name__)
 
 
 class TwilioService:
@@ -13,6 +17,14 @@ class TwilioService:
     def __init__(self):
         self.client = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
         self.from_number = Config.TWILIO_PHONE_NUMBER
+        # Only use status callback if we have a real URL (not localhost)
+        webhook_url = Config.WEBHOOK_BASE_URL
+        if webhook_url and 'localhost' not in webhook_url and '127.0.0.1' not in webhook_url:
+            self.status_callback_url = f"{webhook_url}/api/webhook/status"
+            logger.info(f"Status callbacks enabled: {self.status_callback_url}")
+        else:
+            self.status_callback_url = None
+            logger.info("Status callbacks disabled (no production webhook URL configured)")
     
     def send_sms(self, to_number: str, body: str) -> dict:
         """Send a single SMS message"""
@@ -29,13 +41,19 @@ class TwilioService:
         session.commit()
         
         try:
+            # Build message params
+            message_params = {
+                'body': body,
+                'from_': self.from_number,
+                'to': to_number,
+            }
+            
+            # Only add status callback if we have a valid URL
+            if self.status_callback_url:
+                message_params['status_callback'] = self.status_callback_url
+            
             # Send via Twilio
-            twilio_message = self.client.messages.create(
-                body=body,
-                from_=self.from_number,
-                to=to_number,
-                status_callback=f"{Config.WEBHOOK_BASE_URL}/api/webhook/status"
-            )
+            twilio_message = self.client.messages.create(**message_params)
             
             # Update message record
             message.twilio_sid = twilio_message.sid
