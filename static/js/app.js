@@ -273,8 +273,16 @@ async function sendReply() {
     }
 }
 
-// ============ Contacts (Live from Leads DB) ============
+// ============ Contacts ============
+// State for contact tabs
+state.contactsTab = 'leads';  // 'leads' or 'manual'
+
 async function loadContacts(search = '', offset = 0) {
+    if (state.contactsTab === 'manual') {
+        await loadManualContacts();
+        return;
+    }
+    
     const mobileOnly = document.getElementById('mobile-only-filter')?.checked ?? true;
     
     let endpoint = `/contacts?limit=100&offset=${offset}&mobile_only=${mobileOnly}`;
@@ -293,13 +301,32 @@ async function loadContacts(search = '', offset = 0) {
     }
 }
 
+async function loadManualContacts() {
+    const response = await API.get('/contacts/manual');
+    
+    if (response.success) {
+        state.contacts = response.contacts;
+        state.contactsTotal = response.total;
+        state.contactsOffset = 0;
+        renderContactsTable();
+        renderContactsPagination();
+    }
+}
+
 function renderContactsTable() {
     const tbody = document.getElementById('contacts-table-body');
+    const actionsCol = document.getElementById('actions-col');
+    const isManual = state.contactsTab === 'manual';
+    
+    // Show/hide actions column based on tab
+    if (actionsCol) {
+        actionsCol.style.display = isManual ? '' : 'none';
+    }
     
     if (state.contacts.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="empty-state">
+                <td colspan="${isManual ? 7 : 6}" class="empty-state">
                     <i class="fas fa-address-book"></i>
                     <p>No contacts found</p>
                 </td>
@@ -310,14 +337,34 @@ function renderContactsTable() {
     
     tbody.innerHTML = state.contacts.map(contact => `
         <tr>
-            <td><input type="checkbox" class="contact-select" data-phone="${contact.phone_number}"></td>
+            <td><input type="checkbox" class="contact-select" data-phone="${contact.phone_number || contact.phone}"></td>
             <td>${contact.name || '-'}</td>
-            <td>${contact.phone_number}</td>
+            <td>${contact.phone_number || contact.phone}</td>
             <td>${contact.company || '-'}</td>
             <td>${contact.role || '-'}</td>
             <td><span class="badge badge-${contact.source}">${contact.source || 'permit'}</span></td>
+            ${isManual ? `
+                <td>
+                    <button class="btn btn-sm btn-secondary edit-contact" data-id="${contact.id}" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger delete-contact" data-id="${contact.id}" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            ` : ''}
         </tr>
     `).join('');
+    
+    // Add event handlers for manual contacts
+    if (isManual) {
+        tbody.querySelectorAll('.edit-contact').forEach(btn => {
+            btn.addEventListener('click', () => editContact(parseInt(btn.dataset.id)));
+        });
+        tbody.querySelectorAll('.delete-contact').forEach(btn => {
+            btn.addEventListener('click', () => deleteContact(parseInt(btn.dataset.id)));
+        });
+    }
 }
 
 function renderContactsPagination() {
@@ -327,6 +374,12 @@ function renderContactsPagination() {
     const limit = 100;
     const currentPage = Math.floor(offset / limit) + 1;
     const totalPages = Math.ceil(total / limit);
+    
+    // For manual contacts, don't show pagination
+    if (state.contactsTab === 'manual') {
+        container.innerHTML = `<span style="color: var(--text-secondary);">${total.toLocaleString()} manual contacts</span>`;
+        return;
+    }
     
     if (totalPages <= 1) {
         container.innerHTML = `<span style="color: var(--text-secondary);">${total.toLocaleString()} contacts</span>`;
@@ -344,6 +397,119 @@ function renderContactsPagination() {
             Next <i class="fas fa-chevron-right"></i>
         </button>
     `;
+}
+
+// ============ Manual Contacts CRUD ============
+
+function openAddContactModal() {
+    document.getElementById('contact-modal-title').textContent = 'Add Contact';
+    document.getElementById('contact-form').reset();
+    document.getElementById('contact-edit-id').value = '';
+    showModal('contact-modal');
+}
+
+function editContact(contactId) {
+    const contact = state.contacts.find(c => c.id === contactId);
+    if (!contact) return;
+    
+    document.getElementById('contact-modal-title').textContent = 'Edit Contact';
+    document.getElementById('contact-edit-id').value = contactId;
+    document.getElementById('contact-phone').value = contact.phone || contact.phone_number || '';
+    document.getElementById('contact-name').value = contact.name || '';
+    document.getElementById('contact-company').value = contact.company || '';
+    document.getElementById('contact-role').value = contact.role || '';
+    document.getElementById('contact-notes').value = contact.notes || '';
+    showModal('contact-modal');
+}
+
+async function saveContact() {
+    const editId = document.getElementById('contact-edit-id').value;
+    const data = {
+        phone: document.getElementById('contact-phone').value.trim(),
+        name: document.getElementById('contact-name').value.trim(),
+        company: document.getElementById('contact-company').value.trim(),
+        role: document.getElementById('contact-role').value.trim(),
+        notes: document.getElementById('contact-notes').value.trim()
+    };
+    
+    if (!data.phone) {
+        showToast('Phone number is required', 'error');
+        return;
+    }
+    
+    let response;
+    if (editId) {
+        response = await API.put(`/contacts/manual/${editId}`, data);
+    } else {
+        response = await API.post('/contacts/manual', data);
+    }
+    
+    if (response.success) {
+        hideModal('contact-modal');
+        showToast(editId ? 'Contact updated' : 'Contact added');
+        await loadManualContacts();
+    } else {
+        showToast(response.error || 'Failed to save contact', 'error');
+    }
+}
+
+async function deleteContact(contactId) {
+    if (!confirm('Are you sure you want to delete this contact?')) return;
+    
+    const response = await API.delete(`/contacts/manual/${contactId}`);
+    
+    if (response.success) {
+        showToast('Contact deleted');
+        await loadManualContacts();
+    } else {
+        showToast(response.error || 'Failed to delete contact', 'error');
+    }
+}
+
+// ============ CSV Upload ============
+
+let csvFileData = null;
+
+function previewCSV(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        csvFileData = e.target.result;
+        const lines = csvFileData.split('\n').slice(0, 6);  // Header + 5 rows
+        const previewContent = document.getElementById('csv-preview-content');
+        previewContent.innerHTML = `<pre style="margin: 0; white-space: pre-wrap;">${lines.join('\n')}</pre>`;
+        document.getElementById('csv-preview').style.display = 'block';
+        document.getElementById('upload-csv-submit').disabled = false;
+    };
+    reader.readAsText(file);
+}
+
+async function uploadCSV() {
+    if (!csvFileData) {
+        showToast('No file selected', 'error');
+        return;
+    }
+    
+    const response = await API.post('/contacts/manual/upload', { csv_data: csvFileData });
+    
+    if (response.success) {
+        hideModal('csv-modal');
+        showToast(`Added ${response.added} contacts, skipped ${response.skipped}`);
+        if (response.errors && response.errors.length > 0) {
+            console.log('CSV upload errors:', response.errors);
+        }
+        // Switch to manual tab and reload
+        state.contactsTab = 'manual';
+        updateContactsTabs();
+        await loadManualContacts();
+    } else {
+        showToast(response.error || 'Failed to upload CSV', 'error');
+    }
+}
+
+function updateContactsTabs() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === state.contactsTab);
+    });
 }
 
 // ============ Compose ============
@@ -711,6 +877,42 @@ function initEventListeners() {
             cb.checked = e.target.checked;
         });
     });
+    
+    // ============ Contact Management ============
+    
+    // Contact tabs
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            state.contactsTab = btn.dataset.tab;
+            updateContactsTabs();
+            loadContacts();
+        });
+    });
+    
+    // Add contact button
+    document.getElementById('add-contact-btn').addEventListener('click', openAddContactModal);
+    
+    // Save contact button
+    document.getElementById('save-contact-btn').addEventListener('click', saveContact);
+    
+    // CSV upload button
+    document.getElementById('upload-csv-btn').addEventListener('click', () => {
+        document.getElementById('csv-file').value = '';
+        document.getElementById('csv-preview').style.display = 'none';
+        document.getElementById('upload-csv-submit').disabled = true;
+        csvFileData = null;
+        showModal('csv-modal');
+    });
+    
+    // CSV file selection
+    document.getElementById('csv-file').addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            previewCSV(e.target.files[0]);
+        }
+    });
+    
+    // CSV upload submit
+    document.getElementById('upload-csv-submit').addEventListener('click', uploadCSV);
 }
 
 // ============ Initialize ============

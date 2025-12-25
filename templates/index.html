@@ -104,14 +104,27 @@
             <!-- Contacts View -->
             <section id="contacts-view" class="view">
                 <div class="view-header">
-                    <h2>Contacts <small style="color: var(--text-secondary); font-weight: normal;">(Live from Leads DB)</small></h2>
+                    <h2>Contacts</h2>
                     <div class="view-actions">
                         <input type="text" id="contact-search" placeholder="Search contacts..." class="search-input">
                         <label class="checkbox-label" style="margin-left: 12px;">
                             <input type="checkbox" id="mobile-only-filter" checked> Mobile only
                         </label>
+                        <button class="btn btn-primary btn-sm" id="add-contact-btn" style="margin-left: 12px;">
+                            <i class="fas fa-plus"></i> Add Contact
+                        </button>
+                        <button class="btn btn-secondary btn-sm" id="upload-csv-btn" style="margin-left: 8px;">
+                            <i class="fas fa-upload"></i> Upload CSV
+                        </button>
                     </div>
                 </div>
+                
+                <!-- Tab switcher for Leads vs Manual contacts -->
+                <div class="contacts-tabs" style="margin-bottom: 16px; display: flex; gap: 8px;">
+                    <button class="tab-btn active" data-tab="leads">Leads DB</button>
+                    <button class="tab-btn" data-tab="manual">Manual Contacts</button>
+                </div>
+                
                 <div class="contacts-table-container">
                     <table class="data-table">
                         <thead>
@@ -122,6 +135,7 @@
                                 <th>Company</th>
                                 <th>Role</th>
                                 <th>Source</th>
+                                <th id="actions-col" style="display: none;">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="contacts-table-body"></tbody>
@@ -236,6 +250,73 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary modal-cancel">Cancel</button>
                 <button class="btn btn-primary" id="save-template-btn">Save Template</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Contact Modal -->
+    <div class="modal" id="contact-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="contact-modal-title">Add Contact</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="contact-form">
+                    <input type="hidden" id="contact-edit-id">
+                    <div class="form-group">
+                        <label for="contact-phone">Phone Number *</label>
+                        <input type="tel" id="contact-phone" placeholder="+1234567890" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="contact-name">Name</label>
+                        <input type="text" id="contact-name" placeholder="John Doe">
+                    </div>
+                    <div class="form-group">
+                        <label for="contact-company">Company</label>
+                        <input type="text" id="contact-company" placeholder="Company Name">
+                    </div>
+                    <div class="form-group">
+                        <label for="contact-role">Role</label>
+                        <input type="text" id="contact-role" placeholder="Owner, Contractor, etc.">
+                    </div>
+                    <div class="form-group">
+                        <label for="contact-notes">Notes</label>
+                        <textarea id="contact-notes" rows="2" placeholder="Additional notes..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="save-contact-btn">Save Contact</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CSV Upload Modal -->
+    <div class="modal" id="csv-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Upload Contacts CSV</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 16px; color: var(--text-secondary);">
+                    Upload a CSV file with contacts. Required column: <strong>phone</strong>.<br>
+                    Optional columns: name, company, role, notes
+                </p>
+                <div class="form-group">
+                    <label for="csv-file">Select CSV File</label>
+                    <input type="file" id="csv-file" accept=".csv" style="padding: 8px 0;">
+                </div>
+                <div id="csv-preview" style="display: none; margin-top: 16px;">
+                    <h4 style="margin-bottom: 8px;">Preview (first 5 rows):</h4>
+                    <div id="csv-preview-content" style="max-height: 200px; overflow: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; font-size: 0.85rem;"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="upload-csv-submit" disabled>Upload</button>
             </div>
         </div>
     </div>

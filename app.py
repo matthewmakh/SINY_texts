@@ -2,12 +2,15 @@ from datetime import datetime
 import signal
 import sys
 import logging
+import csv
+import io
+import re
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from twilio.twiml.messaging_response import MessagingResponse
 
 from config import Config
-from database import init_db, get_session, Message, MessageTemplate
+from database import init_db, get_session, Message, MessageTemplate, ManualContact
 from twilio_service import twilio_service
 from scheduler import message_scheduler
 from leads_service import (
@@ -199,6 +202,208 @@ def get_contacts_stats():
         return jsonify({'success': True, 'stats': stats})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============ API Routes - Manual Contacts ============
+
+def normalize_phone_number(phone):
+    """Normalize phone number to E.164 format"""
+    if not phone:
+        return None
+    # Remove all non-digit characters
+    digits = re.sub(r'\D', '', phone)
+    # Handle US numbers
+    if len(digits) == 10:
+        return f'+1{digits}'
+    elif len(digits) == 11 and digits.startswith('1'):
+        return f'+{digits}'
+    elif len(digits) > 10:
+        return f'+{digits}'
+    return None
+
+
+@app.route('/api/contacts/manual', methods=['GET'])
+def get_manual_contacts():
+    """Get all manually added contacts"""
+    session = get_session()
+    try:
+        contacts = session.query(ManualContact).order_by(ManualContact.name).all()
+        return jsonify({
+            'success': True,
+            'contacts': [c.to_dict() for c in contacts],
+            'total': len(contacts)
+        })
+    finally:
+        session.close()
+
+
+@app.route('/api/contacts/manual', methods=['POST'])
+def add_manual_contact():
+    """Add a single manual contact"""
+    data = request.json
+    phone = data.get('phone') or data.get('phone_number')
+    name = data.get('name')
+    company = data.get('company')
+    role = data.get('role')
+    notes = data.get('notes')
+    
+    if not phone:
+        return jsonify({'success': False, 'error': 'Phone number is required'}), 400
+    
+    normalized = normalize_phone_number(phone)
+    if not normalized:
+        return jsonify({'success': False, 'error': 'Invalid phone number format'}), 400
+    
+    session = get_session()
+    try:
+        # Check if already exists
+        existing = session.query(ManualContact).filter_by(phone_number=normalized).first()
+        if existing:
+            return jsonify({'success': False, 'error': 'Contact with this phone number already exists'}), 400
+        
+        contact = ManualContact(
+            phone_number=normalized,
+            name=name,
+            company=company,
+            role=role,
+            notes=notes
+        )
+        session.add(contact)
+        session.commit()
+        
+        return jsonify({'success': True, 'contact': contact.to_dict()})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/contacts/manual/<int:contact_id>', methods=['PUT'])
+def update_manual_contact(contact_id):
+    """Update a manual contact"""
+    data = request.json
+    session = get_session()
+    try:
+        contact = session.query(ManualContact).get(contact_id)
+        if not contact:
+            return jsonify({'success': False, 'error': 'Contact not found'}), 404
+        
+        if 'name' in data:
+            contact.name = data['name']
+        if 'company' in data:
+            contact.company = data['company']
+        if 'role' in data:
+            contact.role = data['role']
+        if 'notes' in data:
+            contact.notes = data['notes']
+        if 'phone' in data or 'phone_number' in data:
+            phone = data.get('phone') or data.get('phone_number')
+            normalized = normalize_phone_number(phone)
+            if normalized:
+                contact.phone_number = normalized
+        
+        session.commit()
+        return jsonify({'success': True, 'contact': contact.to_dict()})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/contacts/manual/<int:contact_id>', methods=['DELETE'])
+def delete_manual_contact(contact_id):
+    """Delete a manual contact"""
+    session = get_session()
+    try:
+        contact = session.query(ManualContact).get(contact_id)
+        if not contact:
+            return jsonify({'success': False, 'error': 'Contact not found'}), 404
+        
+        session.delete(contact)
+        session.commit()
+        return jsonify({'success': True})
+    finally:
+        session.close()
+
+
+@app.route('/api/contacts/manual/upload', methods=['POST'])
+def upload_contacts_csv():
+    """
+    Bulk upload contacts via CSV.
+    Expected columns: phone (required), name, company, role, notes
+    """
+    if 'file' not in request.files:
+        # Check if CSV data was sent as text
+        csv_data = request.form.get('csv_data') or request.json.get('csv_data') if request.is_json else None
+        if not csv_data:
+            return jsonify({'success': False, 'error': 'No file or CSV data provided'}), 400
+        file_content = csv_data
+    else:
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+        file_content = file.read().decode('utf-8')
+    
+    session = get_session()
+    try:
+        reader = csv.DictReader(io.StringIO(file_content))
+        
+        added = 0
+        skipped = 0
+        errors = []
+        
+        for i, row in enumerate(reader, start=2):  # Start at 2 (header is row 1)
+            # Find phone column (flexible naming)
+            phone = row.get('phone') or row.get('Phone') or row.get('phone_number') or row.get('Phone Number') or row.get('mobile') or row.get('Mobile')
+            
+            if not phone:
+                errors.append(f'Row {i}: Missing phone number')
+                skipped += 1
+                continue
+            
+            normalized = normalize_phone_number(phone)
+            if not normalized:
+                errors.append(f'Row {i}: Invalid phone number "{phone}"')
+                skipped += 1
+                continue
+            
+            # Check for duplicate
+            existing = session.query(ManualContact).filter_by(phone_number=normalized).first()
+            if existing:
+                skipped += 1
+                continue
+            
+            # Get other fields (flexible naming)
+            name = row.get('name') or row.get('Name') or row.get('contact_name') or row.get('Contact Name')
+            company = row.get('company') or row.get('Company') or row.get('business') or row.get('Business')
+            role = row.get('role') or row.get('Role') or row.get('title') or row.get('Title')
+            notes = row.get('notes') or row.get('Notes') or row.get('comments') or row.get('Comments')
+            
+            contact = ManualContact(
+                phone_number=normalized,
+                name=name,
+                company=company,
+                role=role,
+                notes=notes
+            )
+            session.add(contact)
+            added += 1
+        
+        session.commit()
+        
+        return jsonify({
+            'success': True,
+            'added': added,
+            'skipped': skipped,
+            'errors': errors[:10] if errors else []  # Return first 10 errors max
+        })
+    except Exception as e:
+        session.rollback()
+        return jsonify({'success': False, 'error': f'CSV parsing error: {str(e)}'}), 400
+    finally:
+        session.close()
 
 
 # ============ API Routes - Scheduling ============

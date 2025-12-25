@@ -142,6 +142,33 @@ class MessageTemplate(Base):
         }
 
 
+class ManualContact(Base):
+    """Manually added contacts (separate from scraped leads)"""
+    __tablename__ = 'manual_contacts'
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=True)
+    phone_number = Column(String(20), nullable=False, unique=True, index=True)
+    company = Column(String(255), nullable=True)
+    role = Column(String(100), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'phone': self.phone_number,
+            'phone_number': self.phone_number,
+            'company': self.company,
+            'role': self.role,
+            'notes': self.notes,
+            'source': 'manual',
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
 def init_db():
     """Initialize the database tables"""
     try:
