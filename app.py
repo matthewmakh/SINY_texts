@@ -1,4 +1,7 @@
 from datetime import datetime
+import signal
+import sys
+import logging
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from twilio.twiml.messaging_response import MessagingResponse
@@ -14,6 +17,13 @@ from leads_service import (
     normalize_phone
 )
 
+logger = logging.getLogger(__name__)
+
+# Validate configuration on startup
+if not Config.validate():
+    logger.error("Configuration validation failed. Check your environment variables.")
+    # Don't exit - let Railway see the error in logs
+
 # Initialize Flask app
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -21,6 +31,47 @@ CORS(app)
 
 # Initialize database
 init_db()
+
+
+# ============ Graceful Shutdown ============
+
+def graceful_shutdown(signum, frame):
+    """Handle graceful shutdown on SIGTERM"""
+    logger.info("Received shutdown signal, cleaning up...")
+    try:
+        message_scheduler.shutdown()
+        logger.info("Scheduler shut down successfully")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+    sys.exit(0)
+
+# Register signal handlers for graceful shutdown
+signal.signal(signal.SIGTERM, graceful_shutdown)
+signal.signal(signal.SIGINT, graceful_shutdown)
+
+
+# ============ Health Check ============
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for Railway/monitoring"""
+    try:
+        # Check database connection
+        session = get_session()
+        session.execute("SELECT 1")
+        session.close()
+        
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.utcnow().isoformat(),
+            'service': 'sms-dashboard'
+        })
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e)
+        }), 500
 
 
 # ============ Frontend Routes ============
@@ -298,5 +349,19 @@ def get_stats():
     })
 
 
+# ============ Error Handlers ============
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"Internal server error: {error}")
+    return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'success': False, 'error': 'Not found'}), 404
+
+
 if __name__ == '__main__':
+    logger.info("Starting SMS Dashboard in development mode...")
     app.run(debug=Config.DEBUG, port=5000)

@@ -2,11 +2,31 @@ from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.pool import QueuePool
+from contextlib import contextmanager
 import enum
+import logging
 
 from config import Config
 
-engine = create_engine(Config.DATABASE_URL, echo=False)
+logger = logging.getLogger(__name__)
+
+# Create engine with connection pooling for PostgreSQL reliability
+engine_args = {
+    'echo': False,
+    'pool_pre_ping': True,  # Test connections before using them
+}
+
+# Add connection pool settings for PostgreSQL
+if Config.DATABASE_URL and Config.DATABASE_URL.startswith('postgresql'):
+    engine_args.update({
+        'poolclass': QueuePool,
+        'pool_size': 5,
+        'max_overflow': 10,
+        'pool_recycle': 300,  # Recycle connections every 5 minutes
+    })
+
+engine = create_engine(Config.DATABASE_URL, **engine_args)
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
 
@@ -114,12 +134,39 @@ class MessageTemplate(Base):
 
 def init_db():
     """Initialize the database tables"""
-    Base.metadata.create_all(engine)
+    try:
+        Base.metadata.create_all(engine)
+        logger.info("✓ Database tables initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
 
 
 def get_session():
     """Get a new database session"""
     return Session()
+
+
+@contextmanager
+def get_db_session():
+    """
+    Context manager for database sessions.
+    Automatically handles commit/rollback and closing.
+    
+    Usage:
+        with get_db_session() as session:
+            session.query(...)
+    """
+    session = Session()
+    try:
+        yield session
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Database error: {e}")
+        raise
+    finally:
+        session.close()
 
 
 if __name__ == '__main__':

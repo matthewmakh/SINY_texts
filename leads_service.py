@@ -3,37 +3,79 @@ Service to query leads directly from the Railway PostgreSQL database.
 No syncing - contacts are always fetched live from the source.
 """
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import QueuePool
+from sqlalchemy.exc import OperationalError
+import logging
+import time
 from config import Config
 
+logger = logging.getLogger(__name__)
 
 _engine = None
 
 def get_leads_engine():
-    """Get connection to the external leads database (singleton)"""
+    """Get connection to the external leads database with connection pooling"""
     global _engine
     if _engine is None:
         if not Config.LEADS_DATABASE_URL:
             raise Exception("LEADS_DATABASE_URL not configured")
-        _engine = create_engine(Config.LEADS_DATABASE_URL, pool_pre_ping=True)
+        _engine = create_engine(
+            Config.LEADS_DATABASE_URL,
+            poolclass=QueuePool,
+            pool_pre_ping=True,  # Test connections before using
+            pool_size=5,
+            max_overflow=10,
+            pool_recycle=300,  # Recycle connections every 5 minutes
+        )
+        logger.info("✓ Leads database connection pool initialized")
     return _engine
+
+
+def _execute_with_retry(query, params=None, max_retries=3):
+    """Execute a query with retry logic for connection issues"""
+    engine = get_leads_engine()
+    
+    for attempt in range(max_retries):
+        try:
+            with engine.connect() as conn:
+                if params:
+                    result = conn.execute(text(query), params)
+                else:
+                    result = conn.execute(text(query))
+                return result.fetchall()
+        except OperationalError as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database connection error (attempt {attempt + 1}/{max_retries}): {e}")
+                time.sleep(1)  # Wait before retry
+            else:
+                logger.error(f"Database connection failed after {max_retries} attempts: {e}")
+                raise
 
 
 def get_leads_stats():
     """Get stats about available leads"""
     engine = get_leads_engine()
     
-    with engine.connect() as conn:
-        # From contacts table
-        total_contacts = conn.execute(text("SELECT COUNT(*) FROM contacts")).scalar()
-        mobile_contacts = conn.execute(text("SELECT COUNT(*) FROM contacts WHERE is_mobile = true")).scalar()
-        
-        # From owner_contacts table (for future use)
-        owner_contacts = conn.execute(text("SELECT COUNT(*) FROM owner_contacts")).scalar()
-        
+    try:
+        with engine.connect() as conn:
+            # From contacts table
+            total_contacts = conn.execute(text("SELECT COUNT(*) FROM contacts")).scalar()
+            mobile_contacts = conn.execute(text("SELECT COUNT(*) FROM contacts WHERE is_mobile = true")).scalar()
+            
+            # From owner_contacts table (for future use)
+            owner_contacts = conn.execute(text("SELECT COUNT(*) FROM owner_contacts")).scalar()
+            
+            return {
+                'total_contacts': total_contacts,
+                'mobile_contacts': mobile_contacts,
+                'owner_contacts': owner_contacts
+            }
+    except Exception as e:
+        logger.error(f"Error getting leads stats: {e}")
         return {
-            'total_contacts': total_contacts,
-            'mobile_contacts': mobile_contacts,
-            'owner_contacts': owner_contacts
+            'total_contacts': 0,
+            'mobile_contacts': 0,
+            'owner_contacts': 0
         }
 
 
