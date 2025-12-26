@@ -113,6 +113,9 @@
                         <label class="checkbox-label" style="margin-left: 12px;">
                             <input type="checkbox" id="mobile-only-filter" checked> Mobile only
                         </label>
+                        <button class="btn btn-secondary" id="upload-csv-btn">
+                            <i class="fas fa-upload"></i> Upload CSV
+                        </button>
                         <button class="btn btn-primary" id="add-contact-btn">
                             <i class="fas fa-plus"></i> Add Contact
                         </button>
@@ -280,6 +283,58 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary modal-cancel">Cancel</button>
                 <button class="btn btn-primary" id="save-contact-btn">Save Contact</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lead Notes Modal -->
+    <div class="modal" id="lead-notes-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Lead Notes</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="lead-info" style="margin-bottom: 16px; padding: 12px; background: var(--bg-color); border-radius: 8px;">
+                    <strong id="lead-name"></strong><br>
+                    <span id="lead-company" style="color: var(--text-secondary);"></span>
+                </div>
+                <input type="hidden" id="lead-phone">
+                <div class="form-group">
+                    <label for="lead-notes">Notes</label>
+                    <textarea id="lead-notes" rows="4" placeholder="Add notes about this lead..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="save-lead-notes-btn">Save Notes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CSV Upload Modal -->
+    <div class="modal" id="csv-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Upload Contacts (CSV)</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="csv-file">Select CSV File</label>
+                    <input type="file" id="csv-file" accept=".csv" style="padding: 10px;">
+                </div>
+                <div id="csv-preview" style="display: none; margin-top: 16px;">
+                    <p style="margin-bottom: 8px;"><strong>Preview:</strong></p>
+                    <div id="csv-preview-content" style="max-height: 200px; overflow-y: auto; background: var(--bg-color); padding: 12px; border-radius: 8px; font-size: 0.9rem;"></div>
+                </div>
+                <p style="margin-top: 16px; font-size: 0.85rem; color: var(--text-secondary);">
+                    CSV should have columns: name, phone, company (optional), role (optional)
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="upload-csv-submit" disabled>Upload Contacts</button>
             </div>
         </div>
     </div>
