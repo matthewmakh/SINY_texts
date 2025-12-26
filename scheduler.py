@@ -97,6 +97,26 @@ class MessageScheduler:
             logger.error(f"Error calculating next occurrence: {e}")
             return None
     
+    def _fill_template_variables(self, template: str, contact: dict) -> str:
+        """Fill template variables with contact data"""
+        import re
+        result = template
+        
+        # Contact-based variables
+        result = result.replace('{name}', contact.get('name') or '')
+        result = result.replace('{company}', contact.get('company') or '')
+        result = result.replace('{role}', contact.get('role') or '')
+        result = result.replace('{phone}', contact.get('phone_normalized') or contact.get('phone') or '')
+        
+        # Date/time variables
+        result = result.replace('{date}', datetime.now().strftime('%m/%d/%Y'))
+        result = result.replace('{time}', datetime.now().strftime('%I:%M %p'))
+        
+        # Clean up any empty variable results (double spaces)
+        result = re.sub(r' +', ' ', result).strip()
+        
+        return result
+    
     def _check_and_send_due_messages(self):
         """Check database for messages that are due and send them"""
         session = get_session()
@@ -160,9 +180,28 @@ class MessageScheduler:
             bulk_msg.sent_count = 0
             bulk_msg.failed_count = 0
             
+            # Check if message has template variables
+            has_variables = '{' in bulk_msg.body and '}' in bulk_msg.body
+            
+            contacts_map = {}
+            if has_variables:
+                # Get contact info for variable replacement (import at top level)
+                from leads_service import get_contacts_by_phones
+                from twilio_service import normalize_phone
+                contacts_list = get_contacts_by_phones(phone_numbers)
+                contacts_map = {c.get('phone_normalized') or c.get('phone'): c for c in contacts_list}
+            
             # Send ONLY to the specified phone numbers
             for phone in phone_numbers:
-                result = twilio_service.send_sms(phone, bulk_msg.body)
+                # Fill template variables if needed
+                message_body = bulk_msg.body
+                if has_variables:
+                    # Normalize phone to match contacts_map keys
+                    normalized = normalize_phone(phone)
+                    contact = contacts_map.get(normalized, contacts_map.get(phone, {}))
+                    message_body = self._fill_template_variables(message_body, contact)
+                
+                result = twilio_service.send_sms(phone, message_body)
                 if result['success']:
                     bulk_msg.sent_count += 1
                 else:

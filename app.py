@@ -17,10 +17,34 @@ from leads_service import (
     get_leads_stats, 
     get_all_contacts, 
     get_total_contact_count,
-    normalize_phone
+    normalize_phone,
+    get_contacts_by_phones
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ============ Template Variable Processing ============
+
+def fill_template_variables(template: str, contact: dict) -> str:
+    """Fill template variables with contact data"""
+    result = template
+    
+    # Contact-based variables
+    result = result.replace('{name}', contact.get('name') or '')
+    result = result.replace('{company}', contact.get('company') or '')
+    result = result.replace('{role}', contact.get('role') or '')
+    result = result.replace('{phone}', contact.get('phone_normalized') or contact.get('phone') or '')
+    
+    # Date/time variables
+    result = result.replace('{date}', datetime.now().strftime('%m/%d/%Y'))
+    result = result.replace('{time}', datetime.now().strftime('%I:%M %p'))
+    
+    # Clean up any empty variable results (double spaces)
+    result = re.sub(r' +', ' ', result).strip()
+    
+    return result
+
 
 # Validate configuration on startup
 if not Config.validate():
@@ -112,7 +136,7 @@ def send_message():
 
 @app.route('/api/messages/bulk', methods=['POST'])
 def send_bulk_messages():
-    """Send bulk SMS to multiple recipients (by phone numbers)"""
+    """Send bulk SMS to multiple recipients (by phone numbers) with template variable support"""
     data = request.json
     body = data.get('body')
     phone_numbers = data.get('phone_numbers', [])
@@ -123,8 +147,36 @@ def send_bulk_messages():
     if not phone_numbers:
         return jsonify({'success': False, 'error': 'No recipients specified'}), 400
     
-    result = twilio_service.send_bulk_sms(phone_numbers, body)
-    return jsonify({'success': True, **result})
+    # Check if body contains template variables
+    has_variables = '{' in body and '}' in body
+    
+    if has_variables:
+        # Get contact info for variable replacement
+        contacts_list = get_contacts_by_phones(phone_numbers)
+        contacts_map = {c.get('phone_normalized') or c.get('phone'): c for c in contacts_list}
+        
+        results = {'sent': 0, 'failed': 0, 'messages': []}
+        
+        for phone in phone_numbers:
+            normalized = normalize_phone_number(phone)
+            # Try normalized first, then raw phone as fallback
+            contact = contacts_map.get(normalized, contacts_map.get(phone, {}))
+            
+            # Fill template variables
+            personalized_body = fill_template_variables(body, contact)
+            
+            result = twilio_service.send_sms(phone, personalized_body)
+            if result['success']:
+                results['sent'] += 1
+            else:
+                results['failed'] += 1
+            results['messages'].append(result)
+        
+        return jsonify({'success': True, **results})
+    else:
+        # No variables, use simple bulk send
+        result = twilio_service.send_bulk_sms(phone_numbers, body)
+        return jsonify({'success': True, **result})
 
 
 # ============ API Routes - Conversations ============

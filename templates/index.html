@@ -280,7 +280,19 @@
                     </div>
                     <div class="form-group">
                         <label for="template-body">Message Body</label>
-                        <textarea id="template-body" rows="5" required></textarea>
+                        <textarea id="template-body" rows="5" required placeholder="Hi {name}, this is a reminder about your permit..."></textarea>
+                        <div style="margin-top: 8px; padding: 12px; background: var(--surface-color); border-radius: 8px; border: 1px solid var(--border-color);">
+                            <p style="margin: 0 0 8px 0; font-size: 0.85rem; color: var(--text-secondary);"><i class="fas fa-magic"></i> <strong>Available Variables</strong> (click to insert)</p>
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="variable-buttons">
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{name}"><i class="fas fa-user"></i> {name}</button>
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{company}"><i class="fas fa-building"></i> {company}</button>
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{role}"><i class="fas fa-briefcase"></i> {role}</button>
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{phone}"><i class="fas fa-phone"></i> {phone}</button>
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{date}"><i class="fas fa-calendar"></i> {date}</button>
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{time}"><i class="fas fa-clock"></i> {time}</button>
+                            </div>
+                            <p style="margin: 8px 0 0 0; font-size: 0.8rem; color: var(--text-muted);">Variables are automatically filled from contact info when sending.</p>
+                        </div>
                     </div>
                 </form>
             </div>

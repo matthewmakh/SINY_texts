@@ -898,6 +898,34 @@ function renderScheduledList(scheduled) {
 }
 
 // ============ Templates ============
+const TEMPLATE_VARIABLES = {
+    '{name}': (contact) => contact?.name || '',
+    '{company}': (contact) => contact?.company || '',
+    '{role}': (contact) => contact?.role || '',
+    '{phone}': (contact) => contact?.phone || contact?.phone_number || '',
+    '{date}': () => new Date().toLocaleDateString(),
+    '{time}': () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+};
+
+function highlightVariables(text) {
+    // Highlight variables in template preview
+    return text.replace(/\{(\w+)\}/g, '<span class="template-var">{$1}</span>');
+}
+
+function fillTemplateVariables(template, contact) {
+    let result = template;
+    for (const [variable, getter] of Object.entries(TEMPLATE_VARIABLES)) {
+        const value = getter(contact);
+        result = result.replace(new RegExp(variable.replace(/[{}]/g, '\\$&'), 'g'), value);
+    }
+    return result;
+}
+
+function hasUnfilledVariables(text) {
+    // Check if there are any unfilled variables (empty replacements)
+    return /\{(\w+)\}/.test(text) || text.includes('  ') || text.startsWith(' ');
+}
+
 async function loadTemplates() {
     const response = await API.get('/templates');
     if (response.success) {
@@ -919,20 +947,28 @@ function renderTemplatesList() {
         return;
     }
     
-    container.innerHTML = state.templates.map(template => `
-        <div class="template-card">
-            <h4>${template.name}</h4>
-            <p>${template.body}</p>
-            <div class="template-actions">
-                <button class="btn btn-sm btn-primary use-template" data-body="${encodeURIComponent(template.body)}">
-                    Use
-                </button>
-                <button class="btn btn-sm btn-danger delete-template" data-id="${template.id}">
-                    Delete
-                </button>
+    container.innerHTML = state.templates.map(template => {
+        // Highlight variables in preview
+        const previewBody = highlightVariables(template.body);
+        // Detect which variables are used
+        const usedVars = (template.body.match(/\{(\w+)\}/g) || []).join(' ');
+        
+        return `
+            <div class="template-card">
+                <h4>${template.name}</h4>
+                <p class="template-preview">${previewBody}</p>
+                ${usedVars ? `<p style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);"><i class="fas fa-magic"></i> Uses: ${usedVars}</p>` : ''}
+                <div class="template-actions">
+                    <button class="btn btn-sm btn-primary use-template" data-id="${template.id}" data-body="${encodeURIComponent(template.body)}">
+                        <i class="fas fa-edit"></i> Use
+                    </button>
+                    <button class="btn btn-sm btn-danger delete-template" data-id="${template.id}">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
     
     // Add handlers
     container.querySelectorAll('.use-template').forEach(btn => {
@@ -1069,6 +1105,20 @@ function initEventListeners() {
     document.getElementById('add-template-btn').addEventListener('click', () => {
         document.getElementById('template-form').reset();
         showModal('template-modal');
+    });
+    
+    // Variable insert buttons in template modal
+    document.querySelectorAll('.insert-var').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const textarea = document.getElementById('template-body');
+            const variable = btn.dataset.var;
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const text = textarea.value;
+            textarea.value = text.substring(0, start) + variable + text.substring(end);
+            textarea.focus();
+            textarea.setSelectionRange(start + variable.length, start + variable.length);
+        });
     });
     
     // Save template

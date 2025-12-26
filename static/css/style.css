@@ -664,6 +664,20 @@ body {
     gap: 8px;
 }
 
+.template-preview {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.template-var {
+    background: linear-gradient(135deg, #dbeafe, #e0e7ff);
+    color: #3730a3;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+    font-size: 0.9em;
+}
+
 /* ============ Modal ============ */
 .modal {
     display: none;
