@@ -4,9 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SMS Dashboard - PNYC</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -15,26 +12,26 @@
         <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <h1><i class="fas fa-bolt"></i> <span>SMS Dashboard</span></h1>
+                <h1><i class="fas fa-sms"></i> SMS Dashboard</h1>
             </div>
             <nav class="sidebar-nav">
                 <a href="#" class="nav-item active" data-view="dashboard">
-                    <i class="fas fa-chart-pie"></i> <span>Dashboard</span>
+                    <i class="fas fa-home"></i> Dashboard
                 </a>
                 <a href="#" class="nav-item" data-view="conversations">
-                    <i class="fas fa-comments"></i> <span>Conversations</span>
+                    <i class="fas fa-comments"></i> Conversations
                 </a>
                 <a href="#" class="nav-item" data-view="contacts">
-                    <i class="fas fa-users"></i> <span>Contacts</span>
+                    <i class="fas fa-address-book"></i> Contacts
                 </a>
                 <a href="#" class="nav-item" data-view="compose">
-                    <i class="fas fa-paper-plane"></i> <span>Send Message</span>
+                    <i class="fas fa-paper-plane"></i> Send Message
                 </a>
                 <a href="#" class="nav-item" data-view="scheduled">
-                    <i class="fas fa-calendar-alt"></i> <span>Scheduled</span>
+                    <i class="fas fa-clock"></i> Scheduled
                 </a>
                 <a href="#" class="nav-item" data-view="templates">
-                    <i class="fas fa-file-alt"></i> <span>Templates</span>
+                    <i class="fas fa-file-alt"></i> Templates
                 </a>
             </nav>
         </aside>
@@ -113,18 +110,18 @@
                         <label class="checkbox-label" style="margin-left: 12px;">
                             <input type="checkbox" id="mobile-only-filter" checked> Mobile only
                         </label>
-                        <button class="btn btn-secondary" id="upload-csv-btn">
-                            <i class="fas fa-upload"></i> Upload CSV
-                        </button>
-                        <button class="btn btn-primary" id="add-contact-btn">
+                        <button class="btn btn-primary btn-sm" id="add-contact-btn" style="margin-left: 12px;">
                             <i class="fas fa-plus"></i> Add Contact
+                        </button>
+                        <button class="btn btn-secondary btn-sm" id="upload-csv-btn" style="margin-left: 8px;">
+                            <i class="fas fa-upload"></i> Upload CSV
                         </button>
                     </div>
                 </div>
                 
-                <!-- Contact Tabs -->
-                <div class="contact-tabs" style="margin-bottom: 20px;">
-                    <button class="tab-btn active" data-tab="leads">Leads Database</button>
+                <!-- Tab switcher for Leads vs Manual contacts -->
+                <div class="contacts-tabs" style="margin-bottom: 16px; display: flex; gap: 8px;">
+                    <button class="tab-btn active" data-tab="leads">Leads DB</button>
                     <button class="tab-btn" data-tab="manual">Manual Contacts</button>
                 </div>
                 
@@ -138,7 +135,7 @@
                                 <th>Company</th>
                                 <th>Role</th>
                                 <th>Source</th>
-                                <th>Actions</th>
+                                <th id="actions-col">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="contacts-table-body"></tbody>
@@ -152,15 +149,20 @@
                 <div class="view-header">
                     <h2>Send Message</h2>
                 </div>
+                <!-- SAFETY WARNING -->
+                <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px;">
+                    <i class="fas fa-exclamation-triangle" style="color: #d97706; font-size: 20px;"></i>
+                    <div>
+                        <strong style="color: #92400e;">Safety Limit:</strong>
+                        <span style="color: #92400e;">Maximum 50 recipients per message. Scheduled messages require explicit recipient selection.</span>
+                    </div>
+                </div>
                 <div class="compose-form">
                     <div class="form-group">
                         <label>Recipients</label>
                         <div class="recipient-options">
                             <label class="radio-label">
-                                <input type="radio" name="recipient-type" value="all" checked> All Contacts
-                            </label>
-                            <label class="radio-label">
-                                <input type="radio" name="recipient-type" value="selected"> Selected Contacts
+                                <input type="radio" name="recipient-type" value="selected" checked> Selected Contacts
                             </label>
                             <label class="radio-label">
                                 <input type="radio" name="recipient-type" value="single"> Single Number
@@ -171,8 +173,8 @@
                         <label for="single-number">Phone Number</label>
                         <input type="tel" id="single-number" placeholder="+1234567890">
                     </div>
-                    <div class="form-group" id="selected-contacts-group" style="display: none;">
-                        <label>Select Contacts</label>
+                    <div class="form-group" id="selected-contacts-group">
+                        <label>Select Contacts <span id="selected-count" style="color: var(--text-secondary);">(0 selected, max 50)</span></label>
                         <div class="contact-selector" id="contact-selector"></div>
                     </div>
                     <div class="form-group">
@@ -196,6 +198,43 @@
                         <input type="text" id="schedule-name" placeholder="e.g., Weekly Permit Update">
                         <label for="schedule-datetime">Send Date & Time</label>
                         <input type="datetime-local" id="schedule-datetime">
+                        
+                        <!-- Recurring Options -->
+                        <div style="margin-top: 16px; padding: 16px; background: var(--surface-color); border-radius: 8px; border: 1px solid var(--border-color);">
+                            <label class="checkbox-label" style="margin-bottom: 12px;">
+                                <input type="checkbox" id="is-recurring"> <i class="fas fa-redo"></i> Make Recurring
+                            </label>
+                            
+                            <div id="recurring-options" style="display: none;">
+                                <div class="form-group" style="margin-bottom: 12px;">
+                                    <label>Repeat</label>
+                                    <select id="recurrence-type">
+                                        <option value="daily">Daily</option>
+                                        <option value="weekly" selected>Weekly</option>
+                                        <option value="monthly">Monthly</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group" id="weekly-days-group" style="margin-bottom: 12px;">
+                                    <label>On these days</label>
+                                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="mon"> Mon</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="tue"> Tue</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="wed"> Wed</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="thu"> Thu</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="fri"> Fri</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="sat"> Sat</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="sun"> Sun</label>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="recurrence-end">End Date (optional)</label>
+                                    <input type="date" id="recurrence-end" placeholder="Leave empty for no end">
+                                    <small style="color: var(--text-muted);">Leave empty to repeat indefinitely</small>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="form-actions">
                         <button class="btn btn-primary btn-lg" id="send-message-btn">
@@ -241,7 +280,19 @@
                     </div>
                     <div class="form-group">
                         <label for="template-body">Message Body</label>
-                        <textarea id="template-body" rows="5" required></textarea>
+                        <textarea id="template-body" rows="5" required placeholder="Hi {name}, this is a reminder about your permit..."></textarea>
+                        <div style="margin-top: 8px; padding: 12px; background: var(--surface-color); border-radius: 8px; border: 1px solid var(--border-color);">
+                            <p style="margin: 0 0 8px 0; font-size: 0.85rem; color: var(--text-secondary);"><i class="fas fa-magic"></i> <strong>Available Variables</strong> (click to insert)</p>
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="variable-buttons">
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{name}"><i class="fas fa-user"></i> {name}</button>
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{company}"><i class="fas fa-building"></i> {company}</button>
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{role}"><i class="fas fa-briefcase"></i> {role}</button>
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{phone}"><i class="fas fa-phone"></i> {phone}</button>
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{date}"><i class="fas fa-calendar"></i> {date}</button>
+                                <button type="button" class="btn btn-sm btn-secondary insert-var" data-var="{time}"><i class="fas fa-clock"></i> {time}</button>
+                            </div>
+                            <p style="margin: 8px 0 0 0; font-size: 0.8rem; color: var(--text-muted);">Variables are automatically filled from contact info when sending.</p>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -252,7 +303,7 @@
         </div>
     </div>
 
-    <!-- Contact Modal -->
+    <!-- Add Contact Modal -->
     <div class="modal" id="contact-modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -261,22 +312,26 @@
             </div>
             <div class="modal-body">
                 <form id="contact-form">
-                    <input type="hidden" id="contact-id">
+                    <input type="hidden" id="contact-edit-id">
                     <div class="form-group">
-                        <label for="contact-name">Name</label>
-                        <input type="text" id="contact-name" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="contact-phone">Phone Number</label>
+                        <label for="contact-phone">Phone Number *</label>
                         <input type="tel" id="contact-phone" placeholder="+1234567890" required>
                     </div>
                     <div class="form-group">
+                        <label for="contact-name">Name</label>
+                        <input type="text" id="contact-name" placeholder="John Doe">
+                    </div>
+                    <div class="form-group">
                         <label for="contact-company">Company</label>
-                        <input type="text" id="contact-company">
+                        <input type="text" id="contact-company" placeholder="Company Name">
                     </div>
                     <div class="form-group">
                         <label for="contact-role">Role</label>
-                        <input type="text" id="contact-role">
+                        <input type="text" id="contact-role" placeholder="Owner, Contractor, etc.">
+                    </div>
+                    <div class="form-group">
+                        <label for="contact-notes">Notes</label>
+                        <textarea id="contact-notes" rows="2" placeholder="Additional notes..."></textarea>
                     </div>
                 </form>
             </div>
@@ -287,22 +342,26 @@
         </div>
     </div>
 
-    <!-- Lead Notes Modal -->
+    <!-- Lead Notes Modal (for Leads DB contacts - notes only) -->
     <div class="modal" id="lead-notes-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Lead Notes</h3>
+                <h3>Contact Notes</h3>
                 <button class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
-                <div id="lead-info" style="margin-bottom: 16px; padding: 12px; background: var(--bg-color); border-radius: 8px;">
-                    <strong id="lead-name"></strong><br>
-                    <span id="lead-company" style="color: var(--text-secondary);"></span>
+                <div id="lead-notes-info" style="margin-bottom: 16px; padding: 12px; background: var(--surface-color); border-radius: 8px;">
+                    <p style="margin: 0; color: var(--text-secondary);"><strong id="lead-notes-name">-</strong></p>
+                    <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.9rem;" id="lead-notes-phone">-</p>
+                    <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.85rem;" id="lead-notes-company">-</p>
                 </div>
-                <input type="hidden" id="lead-phone">
+                <p style="margin-bottom: 12px; color: var(--text-muted); font-size: 0.85rem;">
+                    <i class="fas fa-info-circle"></i> This contact is from the leads database and cannot be edited. You can add notes below.
+                </p>
+                <input type="hidden" id="lead-notes-phone-input">
                 <div class="form-group">
-                    <label for="lead-notes">Notes</label>
-                    <textarea id="lead-notes" rows="4" placeholder="Add notes about this lead..."></textarea>
+                    <label for="lead-notes-textarea">Notes</label>
+                    <textarea id="lead-notes-textarea" rows="4" placeholder="Add notes about this contact..."></textarea>
                 </div>
             </div>
             <div class="modal-footer">
@@ -316,25 +375,26 @@
     <div class="modal" id="csv-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Upload Contacts (CSV)</h3>
+                <h3>Upload Contacts CSV</h3>
                 <button class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
+                <p style="margin-bottom: 16px; color: var(--text-secondary);">
+                    Upload a CSV file with contacts. Required column: <strong>phone</strong>.<br>
+                    Optional columns: name, company, role, notes
+                </p>
                 <div class="form-group">
                     <label for="csv-file">Select CSV File</label>
-                    <input type="file" id="csv-file" accept=".csv" style="padding: 10px;">
+                    <input type="file" id="csv-file" accept=".csv" style="padding: 8px 0;">
                 </div>
                 <div id="csv-preview" style="display: none; margin-top: 16px;">
-                    <p style="margin-bottom: 8px;"><strong>Preview:</strong></p>
-                    <div id="csv-preview-content" style="max-height: 200px; overflow-y: auto; background: var(--bg-color); padding: 12px; border-radius: 8px; font-size: 0.9rem;"></div>
+                    <h4 style="margin-bottom: 8px;">Preview (first 5 rows):</h4>
+                    <div id="csv-preview-content" style="max-height: 200px; overflow: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; font-size: 0.85rem;"></div>
                 </div>
-                <p style="margin-top: 16px; font-size: 0.85rem; color: var(--text-secondary);">
-                    CSV should have columns: name, phone, company (optional), role (optional)
-                </p>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary modal-cancel">Cancel</button>
-                <button class="btn btn-primary" id="upload-csv-submit" disabled>Upload Contacts</button>
+                <button class="btn btn-primary" id="upload-csv-submit" disabled>Upload</button>
             </div>
         </div>
     </div>
