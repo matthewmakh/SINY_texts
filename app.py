@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 def fill_template_variables(template: str, contact: dict) -> str:
     """Fill template variables with contact data"""
+    from zoneinfo import ZoneInfo
+    
     result = template
     
     # Contact-based variables
@@ -36,9 +38,11 @@ def fill_template_variables(template: str, contact: dict) -> str:
     result = result.replace('{role}', contact.get('role') or '')
     result = result.replace('{phone}', contact.get('phone_normalized') or contact.get('phone') or '')
     
-    # Date/time variables
-    result = result.replace('{date}', datetime.now().strftime('%m/%d/%Y'))
-    result = result.replace('{time}', datetime.now().strftime('%I:%M %p'))
+    # Date/time variables (Eastern Time)
+    eastern = ZoneInfo('America/New_York')
+    now_eastern = datetime.now(eastern)
+    result = result.replace('{date}', now_eastern.strftime('%m/%d/%Y'))
+    result = result.replace('{time}', now_eastern.strftime('%I:%M %p'))
     
     # Clean up any empty variable results (double spaces)
     result = re.sub(r' +', ' ', result).strip()
