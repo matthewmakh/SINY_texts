@@ -127,6 +127,7 @@ body {
     flex: 1;
     margin-left: 260px;
     padding: 24px 32px;
+    overflow-x: hidden;
 }
 
 .view {
@@ -324,6 +325,7 @@ body {
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     overflow: hidden;
+    width: 100%;
 }
 
 .message-item {
@@ -335,6 +337,8 @@ body {
     gap: 16px;
     transition: var(--transition-fast);
     cursor: pointer;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .message-item:hover {
@@ -361,6 +365,7 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 100%;
 }
 
 .message-meta {
