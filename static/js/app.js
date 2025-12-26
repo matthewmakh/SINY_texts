@@ -126,23 +126,125 @@ async function loadViewData(view) {
     }
 }
 
+// ============ Skeleton Loaders ============
+function showStatsSkeleton() {
+    const statIds = ['stat-contacts', 'stat-total', 'stat-sent', 'stat-received'];
+    statIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.innerHTML = '<div class="skeleton" style="height: 28px; width: 50px; display: inline-block;"></div>';
+        }
+    });
+}
+
+function showMessagesSkeleton() {
+    const container = document.getElementById('recent-messages');
+    if (!container) return;
+    
+    container.innerHTML = Array(5).fill(0).map(() => `
+        <div class="skeleton-message-item">
+            <div class="skeleton-message-info">
+                <div class="skeleton skeleton-message-phone"></div>
+                <div class="skeleton skeleton-message-body"></div>
+            </div>
+            <div class="skeleton-message-meta">
+                <div class="skeleton skeleton-message-time"></div>
+                <div class="skeleton skeleton-message-status"></div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function showConversationsSkeleton() {
+    const container = document.getElementById('conversation-list');
+    if (!container) return;
+    
+    container.innerHTML = Array(8).fill(0).map(() => `
+        <div class="skeleton-conversation-item">
+            <div class="skeleton-conversation-header">
+                <div class="skeleton skeleton-conversation-name"></div>
+                <div class="skeleton skeleton-conversation-time"></div>
+            </div>
+            <div class="skeleton skeleton-conversation-preview"></div>
+        </div>
+    `).join('');
+}
+
+function showContactsSkeleton() {
+    const tbody = document.getElementById('contacts-table-body');
+    if (!tbody) return;
+    
+    tbody.innerHTML = Array(10).fill(0).map(() => `
+        <tr class="skeleton-table-row">
+            <td><div class="skeleton skeleton-table-cell" style="width: 20px; height: 20px;"></div></td>
+            <td><div class="skeleton skeleton-table-cell" style="width: 120px;"></div></td>
+            <td><div class="skeleton skeleton-table-cell" style="width: 100px;"></div></td>
+            <td><div class="skeleton skeleton-table-cell" style="width: 140px;"></div></td>
+            <td><div class="skeleton skeleton-table-cell" style="width: 80px;"></div></td>
+            <td><div class="skeleton skeleton-table-cell" style="width: 60px;"></div></td>
+            <td><div class="skeleton skeleton-table-cell" style="width: 80px;"></div></td>
+        </tr>
+    `).join('');
+}
+
+function showTemplatesSkeleton() {
+    const container = document.getElementById('templates-list');
+    if (!container) return;
+    
+    container.innerHTML = Array(4).fill(0).map(() => `
+        <div class="skeleton-template-card">
+            <div class="skeleton skeleton-template-title"></div>
+            <div class="skeleton skeleton-template-body long"></div>
+            <div class="skeleton skeleton-template-body medium"></div>
+            <div class="skeleton-template-actions">
+                <div class="skeleton skeleton-template-btn"></div>
+                <div class="skeleton skeleton-template-btn"></div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function showScheduledSkeleton() {
+    const container = document.getElementById('scheduled-list');
+    if (!container) return;
+    
+    container.innerHTML = Array(3).fill(0).map(() => `
+        <div class="skeleton-scheduled-item">
+            <div class="skeleton-scheduled-info">
+                <div class="skeleton skeleton-scheduled-title"></div>
+                <div class="skeleton skeleton-scheduled-detail"></div>
+                <div class="skeleton skeleton-scheduled-detail" style="width: 100px;"></div>
+            </div>
+            <div class="skeleton-scheduled-actions">
+                <div class="skeleton skeleton-scheduled-btn"></div>
+                <div class="skeleton skeleton-scheduled-btn"></div>
+            </div>
+        </div>
+    `).join('');
+}
+
 // ============ Dashboard ============
 async function loadDashboard() {
-    // Load stats
-    const statsResponse = await API.get('/stats');
-    if (statsResponse.success) {
-        const stats = statsResponse.stats;
-        document.getElementById('stat-contacts').textContent = stats.total_contacts;
-        document.getElementById('stat-total').textContent = stats.total_messages;
-        document.getElementById('stat-sent').textContent = stats.sent_messages;
-        document.getElementById('stat-received').textContent = stats.received_messages;
-    }
+    // Show skeletons immediately
+    showStatsSkeleton();
+    showMessagesSkeleton();
     
-    // Load recent messages
-    const messagesResponse = await API.get('/messages?limit=10');
-    if (messagesResponse.success) {
-        renderRecentMessages(messagesResponse.messages);
-    }
+    // Load stats and messages in parallel, render each as it arrives
+    API.get('/stats').then(statsResponse => {
+        if (statsResponse.success) {
+            const stats = statsResponse.stats;
+            document.getElementById('stat-contacts').textContent = stats.total_contacts;
+            document.getElementById('stat-total').textContent = stats.total_messages;
+            document.getElementById('stat-sent').textContent = stats.sent_messages;
+            document.getElementById('stat-received').textContent = stats.received_messages;
+        }
+    });
+    
+    API.get('/messages?limit=10').then(messagesResponse => {
+        if (messagesResponse.success) {
+            renderRecentMessages(messagesResponse.messages);
+        }
+    });
 }
 
 function renderRecentMessages(messages) {
@@ -174,6 +276,9 @@ function renderRecentMessages(messages) {
 
 // ============ Conversations ============
 async function loadConversations() {
+    // Show skeleton immediately
+    showConversationsSkeleton();
+    
     const response = await API.get('/conversations');
     if (response.success) {
         state.conversations = response.conversations;
@@ -291,6 +396,9 @@ async function sendReply() {
 state.contactsTab = 'leads';  // 'leads' or 'manual'
 
 async function loadContacts(search = '', offset = 0) {
+    // Show skeleton immediately
+    showContactsSkeleton();
+    
     if (state.contactsTab === 'manual') {
         await loadManualContacts();
         return;
@@ -773,6 +881,9 @@ function updateCharCount() {
 
 // ============ Scheduled ============
 async function loadScheduled() {
+    // Show skeleton immediately
+    showScheduledSkeleton();
+    
     const response = await API.get('/scheduled');
     if (response.success) {
         renderScheduledList(response.scheduled);
@@ -927,6 +1038,9 @@ function hasUnfilledVariables(text) {
 }
 
 async function loadTemplates() {
+    // Show skeleton immediately
+    showTemplatesSkeleton();
+    
     const response = await API.get('/templates');
     if (response.success) {
         state.templates = response.templates;
