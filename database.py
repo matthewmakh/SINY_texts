@@ -170,6 +170,24 @@ class ManualContact(Base):
         }
 
 
+class ContactNote(Base):
+    """Notes for leads DB contacts (since we can't edit the leads DB directly)"""
+    __tablename__ = 'contact_notes'
+    
+    id = Column(Integer, primary_key=True)
+    phone_number = Column(String(20), nullable=False, unique=True, index=True)  # Links to leads contact
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'phone_number': self.phone_number,
+            'notes': self.notes,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
 def init_db():
     """Initialize the database tables"""
     try:

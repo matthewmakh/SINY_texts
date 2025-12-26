@@ -135,7 +135,7 @@
                                 <th>Company</th>
                                 <th>Role</th>
                                 <th>Source</th>
-                                <th id="actions-col" style="display: none;">Actions</th>
+                                <th id="actions-col">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="contacts-table-body"></tbody>
@@ -289,6 +289,35 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary modal-cancel">Cancel</button>
                 <button class="btn btn-primary" id="save-contact-btn">Save Contact</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lead Notes Modal (for Leads DB contacts - notes only) -->
+    <div class="modal" id="lead-notes-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Contact Notes</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="lead-notes-info" style="margin-bottom: 16px; padding: 12px; background: var(--surface-color); border-radius: 8px;">
+                    <p style="margin: 0; color: var(--text-secondary);"><strong id="lead-notes-name">-</strong></p>
+                    <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.9rem;" id="lead-notes-phone">-</p>
+                    <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.85rem;" id="lead-notes-company">-</p>
+                </div>
+                <p style="margin-bottom: 12px; color: var(--text-muted); font-size: 0.85rem;">
+                    <i class="fas fa-info-circle"></i> This contact is from the leads database and cannot be edited. You can add notes below.
+                </p>
+                <input type="hidden" id="lead-notes-phone-input">
+                <div class="form-group">
+                    <label for="lead-notes-textarea">Notes</label>
+                    <textarea id="lead-notes-textarea" rows="4" placeholder="Add notes about this contact..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="save-lead-notes-btn">Save Notes</button>
             </div>
         </div>
     </div>

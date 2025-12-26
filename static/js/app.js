@@ -328,18 +328,12 @@ async function loadManualContacts() {
 
 function renderContactsTable() {
     const tbody = document.getElementById('contacts-table-body');
-    const actionsCol = document.getElementById('actions-col');
     const isManual = state.contactsTab === 'manual';
-    
-    // Show/hide actions column based on tab
-    if (actionsCol) {
-        actionsCol.style.display = isManual ? '' : 'none';
-    }
     
     if (state.contacts.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="${isManual ? 7 : 6}" class="empty-state">
+                <td colspan="7" class="empty-state">
                     <i class="fas fa-address-book"></i>
                     <p>No contacts found</p>
                 </td>
@@ -348,34 +342,45 @@ function renderContactsTable() {
         return;
     }
     
-    tbody.innerHTML = state.contacts.map(contact => `
-        <tr>
-            <td><input type="checkbox" class="contact-select" data-phone="${contact.phone_number || contact.phone}"></td>
-            <td>${contact.name || '-'}</td>
-            <td>${contact.phone_number || contact.phone}</td>
-            <td>${contact.company || '-'}</td>
-            <td>${contact.role || '-'}</td>
-            <td><span class="badge badge-${contact.source}">${contact.source || 'permit'}</span></td>
-            ${isManual ? `
-                <td>
-                    <button class="btn btn-sm btn-secondary edit-contact" data-id="${contact.id}" title="Edit">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button class="btn btn-sm btn-danger delete-contact" data-id="${contact.id}" title="Delete">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </td>
-            ` : ''}
-        </tr>
-    `).join('');
+    tbody.innerHTML = state.contacts.map(contact => {
+        const phone = contact.phone_number || contact.phone;
+        const actionButtons = isManual ? `
+            <button class="btn btn-sm btn-secondary edit-contact" data-id="${contact.id}" title="Edit">
+                <i class="fas fa-edit"></i>
+            </button>
+            <button class="btn btn-sm btn-danger delete-contact" data-id="${contact.id}" title="Delete">
+                <i class="fas fa-trash"></i>
+            </button>
+        ` : `
+            <button class="btn btn-sm btn-secondary lead-notes-btn" data-phone="${phone}" data-name="${contact.name || ''}" data-company="${contact.company || ''}" title="Add Notes">
+                <i class="fas fa-sticky-note"></i>
+            </button>
+        `;
+        
+        return `
+            <tr>
+                <td><input type="checkbox" class="contact-select" data-phone="${phone}"></td>
+                <td>${contact.name || '-'}</td>
+                <td>${phone}</td>
+                <td>${contact.company || '-'}</td>
+                <td>${contact.role || '-'}</td>
+                <td><span class="badge badge-${contact.source}">${contact.source || 'permit'}</span></td>
+                <td>${actionButtons}</td>
+            </tr>
+        `;
+    }).join('');
     
-    // Add event handlers for manual contacts
+    // Add event handlers
     if (isManual) {
         tbody.querySelectorAll('.edit-contact').forEach(btn => {
             btn.addEventListener('click', () => editContact(parseInt(btn.dataset.id)));
         });
         tbody.querySelectorAll('.delete-contact').forEach(btn => {
             btn.addEventListener('click', () => deleteContact(parseInt(btn.dataset.id)));
+        });
+    } else {
+        tbody.querySelectorAll('.lead-notes-btn').forEach(btn => {
+            btn.addEventListener('click', () => openLeadNotesModal(btn.dataset.phone, btn.dataset.name, btn.dataset.company));
         });
     }
 }
@@ -494,6 +499,39 @@ async function deleteContact(contactId) {
         await loadManualContacts();
     } else {
         showToast(response.error || 'Failed to delete contact', 'error');
+    }
+}
+
+// ============ Lead Notes (for Leads DB contacts) ============
+
+async function openLeadNotesModal(phone, name, company) {
+    document.getElementById('lead-notes-name').textContent = name || 'Unknown Contact';
+    document.getElementById('lead-notes-phone').textContent = phone;
+    document.getElementById('lead-notes-company').textContent = company || '';
+    document.getElementById('lead-notes-phone-input').value = phone;
+    
+    // Load existing notes if any
+    const response = await API.get(`/contacts/notes/${encodeURIComponent(phone)}`);
+    if (response.success && response.note) {
+        document.getElementById('lead-notes-textarea').value = response.note.notes || '';
+    } else {
+        document.getElementById('lead-notes-textarea').value = '';
+    }
+    
+    showModal('lead-notes-modal');
+}
+
+async function saveLeadNotes() {
+    const phone = document.getElementById('lead-notes-phone-input').value;
+    const notes = document.getElementById('lead-notes-textarea').value.trim();
+    
+    const response = await API.post('/contacts/notes', { phone, notes });
+    
+    if (response.success) {
+        hideModal('lead-notes-modal');
+        showToast('Notes saved');
+    } else {
+        showToast(response.error || 'Failed to save notes', 'error');
     }
 }
 
@@ -925,6 +963,9 @@ function initEventListeners() {
     
     // Save contact button
     document.getElementById('save-contact-btn').addEventListener('click', saveContact);
+    
+    // Save lead notes button
+    document.getElementById('save-lead-notes-btn').addEventListener('click', saveLeadNotes);
     
     // CSV upload button
     document.getElementById('upload-csv-btn').addEventListener('click', () => {

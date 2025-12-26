@@ -10,7 +10,7 @@ from flask_cors import CORS
 from twilio.twiml.messaging_response import MessagingResponse
 
 from config import Config
-from database import init_db, get_session, Message, MessageTemplate, ManualContact
+from database import init_db, get_session, Message, MessageTemplate, ManualContact, ContactNote
 from twilio_service import twilio_service
 from scheduler import message_scheduler
 from leads_service import (
@@ -402,6 +402,58 @@ def upload_contacts_csv():
     except Exception as e:
         session.rollback()
         return jsonify({'success': False, 'error': f'CSV parsing error: {str(e)}'}), 400
+    finally:
+        session.close()
+
+
+# ============ API Routes - Contact Notes (for Leads DB) ============
+
+@app.route('/api/contacts/notes/<phone>', methods=['GET'])
+def get_contact_note(phone):
+    """Get notes for a leads DB contact"""
+    normalized = normalize_phone_number(phone)
+    if not normalized:
+        return jsonify({'success': False, 'error': 'Invalid phone number'}), 400
+    
+    session = get_session()
+    try:
+        note = session.query(ContactNote).filter_by(phone_number=normalized).first()
+        if note:
+            return jsonify({'success': True, 'note': note.to_dict()})
+        else:
+            return jsonify({'success': True, 'note': {'phone_number': normalized, 'notes': None}})
+    finally:
+        session.close()
+
+
+@app.route('/api/contacts/notes', methods=['POST'])
+def save_contact_note():
+    """Add or update notes for a leads DB contact"""
+    data = request.json
+    phone = data.get('phone') or data.get('phone_number')
+    notes = data.get('notes', '')
+    
+    if not phone:
+        return jsonify({'success': False, 'error': 'Phone number is required'}), 400
+    
+    normalized = normalize_phone_number(phone)
+    if not normalized:
+        return jsonify({'success': False, 'error': 'Invalid phone number'}), 400
+    
+    session = get_session()
+    try:
+        note = session.query(ContactNote).filter_by(phone_number=normalized).first()
+        if note:
+            note.notes = notes
+        else:
+            note = ContactNote(phone_number=normalized, notes=notes)
+            session.add(note)
+        
+        session.commit()
+        return jsonify({'success': True, 'note': note.to_dict()})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         session.close()
 
