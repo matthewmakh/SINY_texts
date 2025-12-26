@@ -122,13 +122,25 @@ def get_messages():
 
 @app.route('/api/messages/send', methods=['POST'])
 def send_message():
-    """Send a single SMS message"""
+    """Send a single SMS message with template variable support"""
     data = request.json
     to_number = data.get('to')
     body = data.get('body')
     
     if not to_number or not body:
         return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+    
+    # Check if body contains template variables
+    if '{' in body and '}' in body:
+        # Get contact info for variable replacement
+        normalized = normalize_phone_number(to_number)
+        contacts_list = get_contacts_by_phones([to_number])
+        contact = {}
+        if contacts_list:
+            contact = contacts_list[0]
+        
+        # Fill template variables
+        body = fill_template_variables(body, contact)
     
     result = twilio_service.send_sms(to_number, body)
     return jsonify(result)
