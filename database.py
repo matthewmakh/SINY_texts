@@ -207,9 +207,44 @@ def init_db():
     try:
         Base.metadata.create_all(engine)
         logger.info("✓ Database tables initialized successfully")
+        
+        # Run migrations for new columns
+        _run_migrations()
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise
+
+
+def _run_migrations():
+    """Add new columns to existing tables if they don't exist"""
+    from sqlalchemy import text
+    
+    migrations = [
+        # Add recurring schedule columns to scheduled_bulk_messages
+        ("scheduled_bulk_messages", "is_recurring", "BOOLEAN DEFAULT FALSE"),
+        ("scheduled_bulk_messages", "recurrence_type", "VARCHAR(20)"),
+        ("scheduled_bulk_messages", "recurrence_days", "VARCHAR(50)"),
+        ("scheduled_bulk_messages", "recurrence_end_date", "TIMESTAMP"),
+        ("scheduled_bulk_messages", "last_sent_at", "TIMESTAMP"),
+        ("scheduled_bulk_messages", "send_count", "INTEGER DEFAULT 0"),
+        # Add contact_notes table columns if needed
+    ]
+    
+    with engine.connect() as conn:
+        for table, column, col_type in migrations:
+            try:
+                # Check if column exists
+                result = conn.execute(text(f"""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = '{table}' AND column_name = '{column}'
+                """))
+                if result.fetchone() is None:
+                    # Column doesn't exist, add it
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+                    conn.commit()
+                    logger.info(f"✓ Added column {column} to {table}")
+            except Exception as e:
+                logger.warning(f"Migration for {table}.{column}: {e}")
 
 
 def get_session():
