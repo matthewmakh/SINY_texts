@@ -745,7 +745,7 @@ function renderContactPickerList(searchTerm = '', roleFilter = '') {
         const term = searchTerm.toLowerCase();
         filtered = filtered.filter(c => 
             (c.name && c.name.toLowerCase().includes(term)) ||
-            (c.phone && c.phone.includes(term)) ||
+            (c.phone_number && c.phone_number.includes(term)) ||
             (c.company && c.company.toLowerCase().includes(term))
         );
     }
@@ -765,14 +765,14 @@ function renderContactPickerList(searchTerm = '', roleFilter = '') {
     }
     
     container.innerHTML = filtered.map(c => {
-        const isSelected = selectedContactPhones.has(c.phone);
+        const isSelected = selectedContactPhones.has(c.phone_number);
         return `
-            <div class="contact-picker-item ${isSelected ? 'selected' : ''}" data-phone="${c.phone}">
+            <div class="contact-picker-item ${isSelected ? 'selected' : ''}" data-phone="${c.phone_number}">
                 <input type="checkbox" ${isSelected ? 'checked' : ''}>
                 <div class="contact-picker-item-info">
                     <div class="contact-picker-item-name">${c.name || 'Unknown'}</div>
                     <div class="contact-picker-item-details">
-                        <span class="contact-picker-item-phone">${c.phone}</span>
+                        <span class="contact-picker-item-phone">${c.phone_number}</span>
                         ${c.company ? `<span>${c.company}</span>` : ''}
                         ${c.role ? `<span class="contact-picker-item-role">${c.role}</span>` : ''}
                     </div>
@@ -833,12 +833,12 @@ function renderSelectedChips() {
     }
     
     // Get contact info for selected phones
-    const selectedContacts = allComposeContacts.filter(c => selectedContactPhones.has(c.phone));
+    const selectedContacts = allComposeContacts.filter(c => selectedContactPhones.has(c.phone_number));
     
     container.innerHTML = selectedContacts.map(c => `
-        <div class="contact-chip" data-phone="${c.phone}">
-            <span>${c.name || c.phone}</span>
-            <span class="chip-remove" onclick="removeContactChip('${c.phone}')">
+        <div class="contact-chip" data-phone="${c.phone_number}">
+            <span>${c.name || c.phone_number}</span>
+            <span class="chip-remove" onclick="removeContactChip('${c.phone_number}')">
                 <i class="fas fa-times"></i>
             </span>
         </div>
@@ -855,7 +855,7 @@ function selectAllVisibleContacts() {
     const items = document.querySelectorAll('#contact-picker-list .contact-picker-item');
     items.forEach(item => {
         const phone = item.dataset.phone;
-        if (!selectedContactPhones.has(phone) && selectedContactPhones.size < MAX_RECIPIENTS) {
+        if (phone && !selectedContactPhones.has(phone) && selectedContactPhones.size < MAX_RECIPIENTS) {
             selectedContactPhones.add(phone);
             item.classList.add('selected');
             item.querySelector('input[type="checkbox"]').checked = true;
