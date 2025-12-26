@@ -695,37 +695,190 @@ function updateContactsTabs() {
 // SAFETY: Maximum recipients
 const MAX_RECIPIENTS = 50;
 
+// Store all contacts for the picker
+let allComposeContacts = [];
+let selectedContactPhones = new Set();
+
 async function loadComposeView() {
     // Load contacts for selector (mobile only for SMS)
     const response = await API.get('/contacts?mobile_only=true&limit=500');
-    const contacts = response.success ? response.contacts : [];
+    allComposeContacts = response.success ? response.contacts : [];
     
     // Load templates
     await loadTemplates();
-    
-    // Populate contact selector with phone numbers
-    const selector = document.getElementById('contact-selector');
-    selector.innerHTML = contacts.map(c => `
-        <label class="contact-checkbox">
-            <input type="checkbox" value="${c.phone}" onchange="updateSelectedCount()">
-            ${c.name || c.phone} ${c.role ? `(${c.role})` : ''}
-        </label>
-    `).join('');
     
     // Populate template dropdown
     const templateSelect = document.getElementById('message-template');
     templateSelect.innerHTML = '<option value="">-- Select Template --</option>' +
         state.templates.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
     
+    // Populate role filter
+    populateRoleFilter();
+    
+    // Render chips
+    renderSelectedChips();
     updateSelectedCount();
 }
 
+function populateRoleFilter() {
+    const roles = [...new Set(allComposeContacts.map(c => c.role).filter(Boolean))];
+    const select = document.getElementById('contact-picker-role-filter');
+    if (select) {
+        select.innerHTML = '<option value="">All Roles</option>' +
+            roles.map(r => `<option value="${r}">${r}</option>`).join('');
+    }
+}
+
+function openContactPicker() {
+    renderContactPickerList();
+    showModal('contact-picker-modal');
+}
+
+function renderContactPickerList(searchTerm = '', roleFilter = '') {
+    const container = document.getElementById('contact-picker-list');
+    if (!container) return;
+    
+    // Filter contacts
+    let filtered = allComposeContacts;
+    
+    if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        filtered = filtered.filter(c => 
+            (c.name && c.name.toLowerCase().includes(term)) ||
+            (c.phone && c.phone.includes(term)) ||
+            (c.company && c.company.toLowerCase().includes(term))
+        );
+    }
+    
+    if (roleFilter) {
+        filtered = filtered.filter(c => c.role === roleFilter);
+    }
+    
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="contact-picker-empty">
+                <i class="fas fa-search"></i>
+                <p>No contacts found</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = filtered.map(c => {
+        const isSelected = selectedContactPhones.has(c.phone);
+        return `
+            <div class="contact-picker-item ${isSelected ? 'selected' : ''}" data-phone="${c.phone}">
+                <input type="checkbox" ${isSelected ? 'checked' : ''}>
+                <div class="contact-picker-item-info">
+                    <div class="contact-picker-item-name">${c.name || 'Unknown'}</div>
+                    <div class="contact-picker-item-details">
+                        <span class="contact-picker-item-phone">${c.phone}</span>
+                        ${c.company ? `<span>${c.company}</span>` : ''}
+                        ${c.role ? `<span class="contact-picker-item-role">${c.role}</span>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Add click handlers
+    container.querySelectorAll('.contact-picker-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            const phone = item.dataset.phone;
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            
+            if (selectedContactPhones.has(phone)) {
+                selectedContactPhones.delete(phone);
+                item.classList.remove('selected');
+                checkbox.checked = false;
+            } else {
+                if (selectedContactPhones.size >= MAX_RECIPIENTS) {
+                    showToast(`Maximum ${MAX_RECIPIENTS} recipients allowed`, 'error');
+                    return;
+                }
+                selectedContactPhones.add(phone);
+                item.classList.add('selected');
+                checkbox.checked = true;
+            }
+            
+            updatePickerCount();
+        });
+    });
+    
+    updatePickerCount();
+}
+
+function updatePickerCount() {
+    const countEl = document.getElementById('contact-picker-count');
+    if (countEl) {
+        const count = selectedContactPhones.size;
+        countEl.textContent = `${count} contact${count !== 1 ? 's' : ''} selected`;
+        countEl.style.color = count > MAX_RECIPIENTS ? '#dc2626' : 'var(--text-secondary)';
+    }
+}
+
+function confirmContactSelection() {
+    renderSelectedChips();
+    updateSelectedCount();
+    hideModal('contact-picker-modal');
+}
+
+function renderSelectedChips() {
+    const container = document.getElementById('selected-contacts-chips');
+    if (!container) return;
+    
+    if (selectedContactPhones.size === 0) {
+        container.innerHTML = '<span class="no-contacts-hint">No contacts selected</span>';
+        return;
+    }
+    
+    // Get contact info for selected phones
+    const selectedContacts = allComposeContacts.filter(c => selectedContactPhones.has(c.phone));
+    
+    container.innerHTML = selectedContacts.map(c => `
+        <div class="contact-chip" data-phone="${c.phone}">
+            <span>${c.name || c.phone}</span>
+            <span class="chip-remove" onclick="removeContactChip('${c.phone}')">
+                <i class="fas fa-times"></i>
+            </span>
+        </div>
+    `).join('');
+}
+
+function removeContactChip(phone) {
+    selectedContactPhones.delete(phone);
+    renderSelectedChips();
+    updateSelectedCount();
+}
+
+function selectAllVisibleContacts() {
+    const items = document.querySelectorAll('#contact-picker-list .contact-picker-item');
+    items.forEach(item => {
+        const phone = item.dataset.phone;
+        if (!selectedContactPhones.has(phone) && selectedContactPhones.size < MAX_RECIPIENTS) {
+            selectedContactPhones.add(phone);
+            item.classList.add('selected');
+            item.querySelector('input[type="checkbox"]').checked = true;
+        }
+    });
+    updatePickerCount();
+}
+
+function clearAllContacts() {
+    selectedContactPhones.clear();
+    document.querySelectorAll('#contact-picker-list .contact-picker-item').forEach(item => {
+        item.classList.remove('selected');
+        item.querySelector('input[type="checkbox"]').checked = false;
+    });
+    updatePickerCount();
+}
+
 function updateSelectedCount() {
-    const selected = document.querySelectorAll('#contact-selector input:checked').length;
     const countEl = document.getElementById('selected-count');
     if (countEl) {
-        countEl.textContent = `(${selected} selected, max ${MAX_RECIPIENTS})`;
-        countEl.style.color = selected > MAX_RECIPIENTS ? '#dc2626' : 'var(--text-secondary)';
+        const count = selectedContactPhones.size;
+        countEl.textContent = `(${count} selected, max ${MAX_RECIPIENTS})`;
+        countEl.style.color = count > MAX_RECIPIENTS ? '#dc2626' : 'var(--text-secondary)';
     }
 }
 
@@ -750,9 +903,7 @@ async function sendMessage() {
         }
         phoneNumbers = [phone];
     } else if (recipientType === 'selected') {
-        phoneNumbers = Array.from(
-            document.querySelectorAll('#contact-selector input:checked')
-        ).map(cb => cb.value);
+        phoneNumbers = Array.from(selectedContactPhones);
         
         if (phoneNumbers.length === 0) {
             showToast('Please select at least one contact', 'error');
@@ -1186,6 +1337,24 @@ function initEventListeners() {
         document.getElementById('send-message-btn').innerHTML = e.target.checked
             ? '<i class="fas fa-clock"></i> Schedule'
             : '<i class="fas fa-paper-plane"></i> Send Now';
+    });
+    
+    // Contact Picker
+    document.getElementById('open-contact-picker-btn')?.addEventListener('click', openContactPicker);
+    document.getElementById('contact-picker-confirm')?.addEventListener('click', confirmContactSelection);
+    document.getElementById('contact-picker-select-all')?.addEventListener('click', selectAllVisibleContacts);
+    document.getElementById('contact-picker-clear-all')?.addEventListener('click', clearAllContacts);
+    
+    // Contact Picker Search
+    document.getElementById('contact-picker-search')?.addEventListener('input', (e) => {
+        const roleFilter = document.getElementById('contact-picker-role-filter')?.value || '';
+        renderContactPickerList(e.target.value, roleFilter);
+    });
+    
+    // Contact Picker Role Filter
+    document.getElementById('contact-picker-role-filter')?.addEventListener('change', (e) => {
+        const searchTerm = document.getElementById('contact-picker-search')?.value || '';
+        renderContactPickerList(searchTerm, e.target.value);
     });
     
     // Recurring toggle
