@@ -734,12 +734,26 @@ function openContactPicker() {
     showModal('contact-picker-modal');
 }
 
-function renderContactPickerList(searchTerm = '', roleFilter = '') {
+function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter = '', mobileOnly = true) {
     const container = document.getElementById('contact-picker-list');
+    const countDisplay = document.getElementById('contact-picker-filtered-count');
     if (!container) return;
+    
+    // Get current filter values from UI if not passed
+    if (arguments.length === 0) {
+        searchTerm = document.getElementById('contact-picker-search')?.value || '';
+        roleFilter = document.getElementById('contact-picker-role-filter')?.value || '';
+        boroughFilter = document.getElementById('contact-picker-borough-filter')?.value || '';
+        mobileOnly = document.getElementById('contact-picker-mobile-only')?.checked ?? true;
+    }
     
     // Filter contacts
     let filtered = allComposeContacts;
+    
+    // Mobile only filter
+    if (mobileOnly) {
+        filtered = filtered.filter(c => c.is_mobile !== false);
+    }
     
     if (searchTerm) {
         const term = searchTerm.toLowerCase();
@@ -752,6 +766,21 @@ function renderContactPickerList(searchTerm = '', roleFilter = '') {
     
     if (roleFilter) {
         filtered = filtered.filter(c => c.role === roleFilter);
+    }
+    
+    if (boroughFilter) {
+        filtered = filtered.filter(c => c.borough === boroughFilter);
+    }
+    
+    // Update filtered count display
+    if (countDisplay) {
+        const totalCount = allComposeContacts.length;
+        const filteredCount = filtered.length;
+        if (filteredCount === totalCount) {
+            countDisplay.innerHTML = `<i class="fas fa-users"></i><span><strong>${totalCount.toLocaleString()}</strong> contacts available</span>`;
+        } else {
+            countDisplay.innerHTML = `<i class="fas fa-filter"></i><span><strong>${filteredCount.toLocaleString()}</strong> of ${totalCount.toLocaleString()} contacts match filters</span>`;
+        }
     }
     
     if (filtered.length === 0) {
@@ -775,6 +804,7 @@ function renderContactPickerList(searchTerm = '', roleFilter = '') {
                         <span class="contact-picker-item-phone">${c.phone_number}</span>
                         ${c.company ? `<span>${c.company}</span>` : ''}
                         ${c.role ? `<span class="contact-picker-item-role">${c.role}</span>` : ''}
+                        ${c.borough ? `<span class="contact-picker-item-borough">${c.borough}</span>` : ''}
                     </div>
                 </div>
             </div>
@@ -815,6 +845,14 @@ function updatePickerCount() {
         countEl.textContent = `${count} contact${count !== 1 ? 's' : ''} selected`;
         countEl.style.color = count > MAX_RECIPIENTS ? '#dc2626' : 'var(--text-secondary)';
     }
+}
+
+function applyContactPickerFilters() {
+    const searchTerm = document.getElementById('contact-picker-search')?.value || '';
+    const roleFilter = document.getElementById('contact-picker-role-filter')?.value || '';
+    const boroughFilter = document.getElementById('contact-picker-borough-filter')?.value || '';
+    const mobileOnly = document.getElementById('contact-picker-mobile-only')?.checked ?? true;
+    renderContactPickerList(searchTerm, roleFilter, boroughFilter, mobileOnly);
 }
 
 function confirmContactSelection() {
@@ -1347,14 +1385,22 @@ function initEventListeners() {
     
     // Contact Picker Search
     document.getElementById('contact-picker-search')?.addEventListener('input', (e) => {
-        const roleFilter = document.getElementById('contact-picker-role-filter')?.value || '';
-        renderContactPickerList(e.target.value, roleFilter);
+        applyContactPickerFilters();
     });
     
     // Contact Picker Role Filter
     document.getElementById('contact-picker-role-filter')?.addEventListener('change', (e) => {
-        const searchTerm = document.getElementById('contact-picker-search')?.value || '';
-        renderContactPickerList(searchTerm, e.target.value);
+        applyContactPickerFilters();
+    });
+    
+    // Contact Picker Borough Filter
+    document.getElementById('contact-picker-borough-filter')?.addEventListener('change', (e) => {
+        applyContactPickerFilters();
+    });
+    
+    // Contact Picker Mobile Only
+    document.getElementById('contact-picker-mobile-only')?.addEventListener('change', (e) => {
+        applyContactPickerFilters();
     });
     
     // Recurring toggle

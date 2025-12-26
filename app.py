@@ -224,6 +224,8 @@ def get_contacts():
     source = request.args.get('source', 'all')  # 'permit', 'owner', or 'all'
     limit = request.args.get('limit', 100, type=int)
     offset = request.args.get('offset', 0, type=int)
+    borough = request.args.get('borough', '')  # MANHATTAN, BROOKLYN, etc.
+    role = request.args.get('role', '')  # Owner, Permittee
     
     try:
         contacts = get_all_contacts(
@@ -231,7 +233,9 @@ def get_contacts():
             mobile_only=mobile_only,
             source=source,
             limit=limit,
-            offset=offset
+            offset=offset,
+            borough=borough if borough else None,
+            role=role if role else None
         )
         
         # Format for frontend
@@ -246,10 +250,16 @@ def get_contacts():
                 'address': c.get('address'),
                 'role': c.get('role'),
                 'source': c.get('source', c.get('contact_source')),
-                'is_mobile': c.get('is_mobile', True)
+                'is_mobile': c.get('is_mobile', True),
+                'borough': c.get('borough')
             })
         
-        total = get_total_contact_count(mobile_only=mobile_only, source=source)
+        total = get_total_contact_count(
+            mobile_only=mobile_only, 
+            source=source,
+            borough=borough if borough else None,
+            role=role if role else None
+        )
         
         return jsonify({
             'success': True, 

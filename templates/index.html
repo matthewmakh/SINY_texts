@@ -422,9 +422,28 @@
                         <select id="contact-picker-role-filter">
                             <option value="">All Roles</option>
                         </select>
+                        <select id="contact-picker-borough-filter">
+                            <option value="">All Boroughs</option>
+                            <option value="MANHATTAN">Manhattan</option>
+                            <option value="BROOKLYN">Brooklyn</option>
+                            <option value="QUEENS">Queens</option>
+                            <option value="BRONX">Bronx</option>
+                            <option value="STATEN ISLAND">Staten Island</option>
+                        </select>
+                        <label class="contact-picker-mobile-toggle">
+                            <input type="checkbox" id="contact-picker-mobile-only" checked>
+                            <span>Mobile Only</span>
+                        </label>
+                    </div>
+                    <div class="contact-picker-filter-row">
                         <button type="button" class="btn btn-sm" id="contact-picker-select-all">Select All Visible</button>
                         <button type="button" class="btn btn-sm btn-secondary" id="contact-picker-clear-all">Clear All</button>
                     </div>
+                </div>
+                <!-- Filtered Count Display -->
+                <div class="contact-picker-filtered-count" id="contact-picker-filtered-count">
+                    <i class="fas fa-users"></i>
+                    <span>Loading contacts...</span>
                 </div>
                 <!-- Contact List -->
                 <div class="contact-picker-list" id="contact-picker-list">

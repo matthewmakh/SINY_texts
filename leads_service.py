@@ -79,7 +79,7 @@ def get_leads_stats():
         }
 
 
-def search_contacts(search: str = None, mobile_only: bool = True, limit: int = 100, offset: int = 0):
+def search_contacts(search: str = None, mobile_only: bool = True, limit: int = 100, offset: int = 0, borough: str = None, role: str = None):
     """
     Search contacts from the leads database.
     Combines permit contacts and owner contacts.
@@ -98,7 +98,8 @@ def search_contacts(search: str = None, mobile_only: bool = True, limit: int = 1
             'permit_contact' as source,
             p.permit_no,
             p.address,
-            p.owner_business_name as company
+            p.owner_business_name as company,
+            p.borough
         FROM contacts c
         LEFT JOIN permit_contacts pc ON c.id = pc.contact_id
         LEFT JOIN permits p ON pc.permit_id = p.id
@@ -119,6 +120,14 @@ def search_contacts(search: str = None, mobile_only: bool = True, limit: int = 1
             OR p.address ILIKE :search
         )"""
         params['search'] = f'%{search}%'
+    
+    if borough:
+        query += " AND p.borough = :borough"
+        params['borough'] = borough
+    
+    if role:
+        query += " AND c.role = :role"
+        params['role'] = role
     
     query += " ORDER BY c.phone, c.updated_at DESC"
     query += f" LIMIT {limit} OFFSET {offset}"
@@ -243,7 +252,7 @@ def get_owner_contacts(search: str = None, limit: int = 100, offset: int = 0):
         return contacts
 
 
-def get_all_contacts(search: str = None, mobile_only: bool = True, source: str = 'all', limit: int = 100, offset: int = 0):
+def get_all_contacts(search: str = None, mobile_only: bool = True, source: str = 'all', limit: int = 100, offset: int = 0, borough: str = None, role: str = None):
     """
     Get contacts from both permit contacts and owner contacts.
     
@@ -253,11 +262,13 @@ def get_all_contacts(search: str = None, mobile_only: bool = True, source: str =
         source: 'permit', 'owner', or 'all'
         limit: Max results
         offset: Pagination offset
+        borough: Filter by borough (MANHATTAN, BROOKLYN, etc.)
+        role: Filter by role (Owner, Permittee)
     """
     contacts = []
     
     if source in ['all', 'permit']:
-        permit_contacts = search_contacts(search, mobile_only, limit, offset)
+        permit_contacts = search_contacts(search, mobile_only, limit, offset, borough, role)
         contacts.extend(permit_contacts)
     
     if source in ['all', 'owner']:
@@ -357,17 +368,30 @@ def get_contacts_by_phones(phones: list):
     return results
 
 
-def get_total_contact_count(mobile_only: bool = True, source: str = 'all'):
+def get_total_contact_count(mobile_only: bool = True, source: str = 'all', borough: str = None, role: str = None):
     """Get total count of contacts for pagination"""
     engine = get_leads_engine()
     total = 0
     
     with engine.connect() as conn:
         if source in ['all', 'permit']:
-            query = "SELECT COUNT(DISTINCT phone) FROM contacts WHERE phone IS NOT NULL AND phone != ''"
+            query = """
+                SELECT COUNT(DISTINCT c.phone) 
+                FROM contacts c
+                LEFT JOIN permit_contacts pc ON c.id = pc.contact_id
+                LEFT JOIN permits p ON pc.permit_id = p.id
+                WHERE c.phone IS NOT NULL AND c.phone != ''
+            """
+            params = {}
             if mobile_only:
-                query += " AND is_mobile = true"
-            total += conn.execute(text(query)).scalar()
+                query += " AND c.is_mobile = true"
+            if borough:
+                query += " AND p.borough = :borough"
+                params['borough'] = borough
+            if role:
+                query += " AND c.role = :role"
+                params['role'] = role
+            total += conn.execute(text(query), params).scalar()
         
         if source in ['all', 'owner']:
             query = "SELECT COUNT(*) FROM owner_contacts WHERE phone IS NOT NULL AND phone != ''"
