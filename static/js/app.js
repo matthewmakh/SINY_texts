@@ -232,10 +232,23 @@ function renderConversationMessages(messages, phone) {
     const conv = state.conversations.find(c => c.phone_number === phone);
     const name = conv?.contact?.name;
     
-    // Update header - show name prominently with phone smaller
-    document.getElementById('conversation-header').innerHTML = name 
+    // Update header - show name prominently with phone smaller, add "Add Contact" if no name
+    let headerHtml = name 
         ? `<strong>${name}</strong><small style="color: var(--text-secondary); margin-left: 12px; font-weight: normal;">${phone}</small>`
-        : `<strong>${phone}</strong>`;
+        : `<strong>${phone}</strong>
+           <button class="btn btn-sm btn-secondary" id="add-contact-from-conv" style="margin-left: 12px;" title="Add to Contacts">
+               <i class="fas fa-user-plus"></i> Add Contact
+           </button>`;
+    
+    document.getElementById('conversation-header').innerHTML = headerHtml;
+    
+    // Add click handler for "Add Contact" button if present
+    const addBtn = document.getElementById('add-contact-from-conv');
+    if (addBtn) {
+        addBtn.addEventListener('click', () => {
+            openAddContactModalWithPhone(phone);
+        });
+    }
     
     // Render messages
     const container = document.getElementById('conversation-messages');
@@ -447,10 +460,28 @@ async function saveContact() {
     if (response.success) {
         hideModal('contact-modal');
         showToast(editId ? 'Contact updated' : 'Contact added');
-        await loadManualContacts();
+        
+        // Reload conversations to show new contact name
+        if (state.currentConversation) {
+            await loadConversations();
+            await loadConversation(state.currentConversation);
+        }
+        
+        // Reload manual contacts if on that tab
+        if (state.contactsTab === 'manual') {
+            await loadManualContacts();
+        }
     } else {
         showToast(response.error || 'Failed to save contact', 'error');
     }
+}
+
+function openAddContactModalWithPhone(phone) {
+    document.getElementById('contact-modal-title').textContent = 'Add Contact';
+    document.getElementById('contact-form').reset();
+    document.getElementById('contact-edit-id').value = '';
+    document.getElementById('contact-phone').value = phone;
+    showModal('contact-modal');
 }
 
 async function deleteContact(contactId) {
