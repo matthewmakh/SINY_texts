@@ -161,6 +161,7 @@ class ManualContact(Base):
             'name': self.name,
             'phone': self.phone_number,
             'phone_number': self.phone_number,
+            'phone_normalized': self.phone_number,  # Already normalized in E.164 format
             'company': self.company,
             'role': self.role,
             'notes': self.notes,
