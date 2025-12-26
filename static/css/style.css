@@ -2,9 +2,12 @@
 :root {
     --primary-color: #4f46e5;
     --primary-hover: #4338ca;
+    --primary-glow: rgba(79, 70, 229, 0.4);
     --secondary-color: #64748b;
     --success-color: #10b981;
+    --success-glow: rgba(16, 185, 129, 0.4);
     --danger-color: #ef4444;
+    --danger-glow: rgba(239, 68, 68, 0.4);
     --warning-color: #f59e0b;
     --bg-color: #f8fafc;
     --sidebar-bg: #1e293b;
@@ -13,9 +16,14 @@
     --text-secondary: #64748b;
     --border-color: #e2e8f0;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    --shadow-hover: 0 10px 25px -5px rgba(0, 0, 0, 0.15);
     --radius: 8px;
     --radius-lg: 12px;
+    --transition-fast: 0.15s ease;
+    --transition-normal: 0.2s ease;
+    --transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ============ Reset & Base ============ */
@@ -72,18 +80,41 @@ body {
     padding: 14px 24px;
     color: rgba(255, 255, 255, 0.7);
     text-decoration: none;
-    transition: all 0.2s;
+    transition: var(--transition-smooth);
     font-size: 0.95rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.nav-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 3px;
+    background: var(--primary-color);
+    transform: scaleY(0);
+    transition: transform var(--transition-smooth);
 }
 
 .nav-item:hover {
     background: rgba(255, 255, 255, 0.1);
     color: white;
+    padding-left: 28px;
+}
+
+.nav-item:hover::before {
+    transform: scaleY(1);
 }
 
 .nav-item.active {
     background: var(--primary-color);
     color: white;
+}
+
+.nav-item.active::before {
+    transform: scaleY(0);
 }
 
 .nav-item i {
@@ -137,7 +168,26 @@ body {
     font-size: 0.9rem;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: var(--transition-smooth);
+    position: relative;
+    overflow: hidden;
+}
+
+.btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(rgba(255,255,255,0.2), transparent);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.btn:hover::after {
+    opacity: 1;
+}
+
+.btn:active {
+    transform: scale(0.98);
 }
 
 .btn-primary {
@@ -147,6 +197,8 @@ body {
 
 .btn-primary:hover {
     background: var(--primary-hover);
+    box-shadow: 0 4px 14px var(--primary-glow);
+    transform: translateY(-1px);
 }
 
 .btn-success {
@@ -156,6 +208,8 @@ body {
 
 .btn-success:hover {
     background: #059669;
+    box-shadow: 0 4px 14px var(--success-glow);
+    transform: translateY(-1px);
 }
 
 .btn-secondary {
@@ -165,6 +219,7 @@ body {
 
 .btn-secondary:hover {
     background: #475569;
+    transform: translateY(-1px);
 }
 
 .btn-danger {
@@ -174,6 +229,8 @@ body {
 
 .btn-danger:hover {
     background: #dc2626;
+    box-shadow: 0 4px 14px var(--danger-glow);
+    transform: translateY(-1px);
 }
 
 .btn-sm {
@@ -213,6 +270,13 @@ body {
     display: flex;
     align-items: center;
     gap: 16px;
+    transition: var(--transition-smooth);
+    cursor: default;
+}
+
+.stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-hover);
 }
 
 .stat-icon {
@@ -225,6 +289,11 @@ body {
     justify-content: center;
     color: white;
     font-size: 1.5rem;
+    transition: var(--transition-smooth);
+}
+
+.stat-card:hover .stat-icon {
+    transform: scale(1.1) rotate(-5deg);
 }
 
 .stat-info {
@@ -264,6 +333,12 @@ body {
     justify-content: space-between;
     align-items: flex-start;
     gap: 16px;
+    transition: var(--transition-fast);
+    cursor: pointer;
+}
+
+.message-item:hover {
+    background: var(--bg-color);
 }
 
 .message-item:last-child {
@@ -334,16 +409,39 @@ body {
     padding: 16px 20px;
     border-bottom: 1px solid var(--border-color);
     cursor: pointer;
-    transition: background 0.2s;
+    transition: var(--transition-smooth);
+    position: relative;
+}
+
+.conversation-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 3px;
+    background: var(--primary-color);
+    transform: scaleY(0);
+    transition: transform var(--transition-smooth);
 }
 
 .conversation-item:hover {
     background: var(--bg-color);
+    padding-left: 24px;
+}
+
+.conversation-item:hover::before {
+    transform: scaleY(1);
 }
 
 .conversation-item.active {
     background: #eef2ff;
     border-left: 3px solid var(--primary-color);
+    padding-left: 17px;
+}
+
+.conversation-item.active::before {
+    transform: scaleY(0);
 }
 
 .conversation-contact {
@@ -411,6 +509,18 @@ body {
     border-radius: 16px;
     font-size: 0.95rem;
     line-height: 1.4;
+    animation: bubbleIn 0.3s ease-out;
+}
+
+@keyframes bubbleIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 .chat-bubble.outbound {
@@ -485,6 +595,10 @@ body {
     color: var(--text-secondary);
 }
 
+.data-table tbody tr {
+    transition: var(--transition-fast);
+}
+
 .data-table tbody tr:hover {
     background: var(--bg-color);
 }
@@ -514,7 +628,7 @@ body {
     border-radius: var(--radius);
     font-family: inherit;
     font-size: 0.95rem;
-    transition: border-color 0.2s;
+    transition: var(--transition-smooth);
 }
 
 .form-group input:focus,
@@ -522,7 +636,7 @@ body {
 .form-group select:focus {
     outline: none;
     border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+    box-shadow: 0 0 0 4px var(--primary-glow);
 }
 
 .search-input {
@@ -610,6 +724,12 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    transition: var(--transition-smooth);
+}
+
+.scheduled-item:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
 }
 
 .scheduled-info h4 {
@@ -649,6 +769,12 @@ body {
     padding: 20px;
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
+    transition: var(--transition-smooth);
+}
+
+.template-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-hover);
 }
 
 .template-card h4 {
@@ -694,10 +820,13 @@ body {
     z-index: 1000;
     align-items: center;
     justify-content: center;
+    opacity: 0;
+    transition: opacity var(--transition-smooth);
 }
 
 .modal.active {
     display: flex;
+    opacity: 1;
 }
 
 .modal-content {
@@ -708,6 +837,12 @@ body {
     max-height: 90vh;
     overflow-y: auto;
     box-shadow: var(--shadow-lg);
+    transform: translateY(20px) scale(0.95);
+    transition: transform var(--transition-smooth);
+}
+
+.modal.active .modal-content {
+    transform: translateY(0) scale(1);
 }
 
 .modal-header {
@@ -728,10 +863,19 @@ body {
     font-size: 1.5rem;
     cursor: pointer;
     color: var(--text-secondary);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition-smooth);
 }
 
 .modal-close:hover {
-    color: var(--text-primary);
+    color: var(--danger-color);
+    background: rgba(239, 68, 68, 0.1);
+    transform: rotate(90deg);
 }
 
 .modal-body {
@@ -746,29 +890,7 @@ body {
     gap: 12px;
 }
 
-/* ============ Toast ============ */
-.toast {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    padding: 16px 24px;
-    background: var(--text-primary);
-    color: white;
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-lg);
-    transform: translateY(100px);
-    opacity: 0;
-    transition: all 0.3s;
-    z-index: 2000;
-}
-
-.toast.show {
-    transform: translateY(0);
-    opacity: 1;
-}
-
-.toast.success { background: var(--success-color); }
-.toast.error { background: var(--danger-color); }
+/* ============ Toast ============ */\n.toast {\n    position: fixed;\n    bottom: 24px;\n    right: 24px;\n    padding: 16px 24px;\n    background: var(--text-primary);\n    color: white;\n    border-radius: var(--radius);\n    box-shadow: var(--shadow-lg);\n    transform: translateY(100px) scale(0.9);\n    opacity: 0;\n    transition: var(--transition-smooth);\n    z-index: 2000;\n}\n\n.toast.show {\n    transform: translateY(0) scale(1);\n    opacity: 1;\n    animation: toastSlide 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);\n}\n\n@keyframes toastSlide {\n    0% {\n        transform: translateY(100px) scale(0.9);\n        opacity: 0;\n    }\n    100% {\n        transform: translateY(0) scale(1);\n        opacity: 1;\n    }\n}\n\n.toast.success { background: var(--success-color); }\n.toast.error { background: var(--danger-color); }
 
 /* ============ Empty State ============ */
 .empty-state {
@@ -835,17 +957,41 @@ body {
     border-radius: var(--radius);
     cursor: pointer;
     font-size: 0.9rem;
-    transition: all 0.2s;
+    transition: var(--transition-smooth);
+    position: relative;
+    overflow: hidden;
+}
+
+.tab-btn::before {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    width: 0;
+    height: 2px;
+    background: var(--primary-color);
+    transition: var(--transition-smooth);
+    transform: translateX(-50%);
 }
 
 .tab-btn:hover {
     background: var(--bg-color);
+    border-color: var(--primary-color);
+}
+
+.tab-btn:hover::before {
+    width: 60%;
 }
 
 .tab-btn.active {
     background: var(--primary-color);
     color: white;
     border-color: var(--primary-color);
+    box-shadow: 0 2px 8px var(--primary-glow);
+}
+
+.tab-btn.active::before {
+    width: 0;
 }
 
 /* Badge for manual contacts */
