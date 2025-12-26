@@ -95,11 +95,19 @@ class ScheduledBulkMessage(Base):
     # This is CRITICAL for safety - we NEVER send to "all contacts"
     recipient_phones = Column(Text, nullable=False)  # JSON array of phone numbers
     scheduled_at = Column(DateTime, nullable=False)
-    status = Column(String(20), default='pending')  # pending, in_progress, completed, cancelled, failed
+    status = Column(String(20), default='pending')  # pending, in_progress, completed, cancelled, failed, paused
     total_recipients = Column(Integer, default=0)
     sent_count = Column(Integer, default=0)
     failed_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Recurring schedule fields
+    is_recurring = Column(Boolean, default=False)
+    recurrence_type = Column(String(20), nullable=True)  # daily, weekly, monthly
+    recurrence_days = Column(String(50), nullable=True)  # For weekly: "mon,wed,fri" etc.
+    recurrence_end_date = Column(DateTime, nullable=True)  # Optional end date (null = forever)
+    last_sent_at = Column(DateTime, nullable=True)  # Track last successful send
+    send_count = Column(Integer, default=0)  # Total times this schedule has sent
     
     def to_dict(self):
         import json
@@ -118,7 +126,13 @@ class ScheduledBulkMessage(Base):
             'total_recipients': self.total_recipients,
             'sent_count': self.sent_count,
             'failed_count': self.failed_count,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'is_recurring': self.is_recurring,
+            'recurrence_type': self.recurrence_type,
+            'recurrence_days': self.recurrence_days,
+            'recurrence_end_date': self.recurrence_end_date.isoformat() if self.recurrence_end_date else None,
+            'last_sent_at': self.last_sent_at.isoformat() if self.last_sent_at else None,
+            'send_count': self.send_count
         }
 
 

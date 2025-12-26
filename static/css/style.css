@@ -630,6 +630,8 @@ body {
 .scheduled-status.pending { background: #fef3c7; color: #b45309; }
 .scheduled-status.completed { background: #d1fae5; color: #047857; }
 .scheduled-status.cancelled { background: #fee2e2; color: #b91c1c; }
+.scheduled-status.paused { background: #e0e7ff; color: #4338ca; }
+.scheduled-status.failed { background: #fee2e2; color: #b91c1c; }
 
 /* ============ Templates List ============ */
 .templates-list {

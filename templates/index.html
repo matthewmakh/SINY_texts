@@ -198,6 +198,43 @@
                         <input type="text" id="schedule-name" placeholder="e.g., Weekly Permit Update">
                         <label for="schedule-datetime">Send Date & Time</label>
                         <input type="datetime-local" id="schedule-datetime">
+                        
+                        <!-- Recurring Options -->
+                        <div style="margin-top: 16px; padding: 16px; background: var(--surface-color); border-radius: 8px; border: 1px solid var(--border-color);">
+                            <label class="checkbox-label" style="margin-bottom: 12px;">
+                                <input type="checkbox" id="is-recurring"> <i class="fas fa-redo"></i> Make Recurring
+                            </label>
+                            
+                            <div id="recurring-options" style="display: none;">
+                                <div class="form-group" style="margin-bottom: 12px;">
+                                    <label>Repeat</label>
+                                    <select id="recurrence-type">
+                                        <option value="daily">Daily</option>
+                                        <option value="weekly" selected>Weekly</option>
+                                        <option value="monthly">Monthly</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group" id="weekly-days-group" style="margin-bottom: 12px;">
+                                    <label>On these days</label>
+                                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="mon"> Mon</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="tue"> Tue</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="wed"> Wed</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="thu"> Thu</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="fri"> Fri</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="sat"> Sat</label>
+                                        <label class="checkbox-label day-checkbox"><input type="checkbox" value="sun"> Sun</label>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="recurrence-end">End Date (optional)</label>
+                                    <input type="date" id="recurrence-end" placeholder="Leave empty for no end">
+                                    <small style="color: var(--text-muted);">Leave empty to repeat indefinitely</small>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="form-actions">
                         <button class="btn btn-primary btn-lg" id="send-message-btn">

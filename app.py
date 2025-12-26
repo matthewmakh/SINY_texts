@@ -476,6 +476,12 @@ def schedule_message():
     scheduled_at = data.get('scheduled_at')
     phone_numbers = data.get('phone_numbers', [])  # MUST be provided
     
+    # Recurring options
+    is_recurring = data.get('is_recurring', False)
+    recurrence_type = data.get('recurrence_type')  # daily, weekly, monthly
+    recurrence_days = data.get('recurrence_days')  # For weekly: "mon,wed,fri"
+    recurrence_end_date = data.get('recurrence_end_date')  # Optional end date
+    
     # SAFETY: Require all fields including phone_numbers
     if not all([name, body, scheduled_at]):
         return jsonify({'success': False, 'error': 'Missing required fields'}), 400
@@ -493,8 +499,25 @@ def schedule_message():
     except:
         return jsonify({'success': False, 'error': 'Invalid date format'}), 400
     
+    # Parse recurrence end date if provided
+    recurrence_end_dt = None
+    if is_recurring and recurrence_end_date:
+        try:
+            recurrence_end_dt = datetime.fromisoformat(recurrence_end_date.replace('Z', '+00:00'))
+        except:
+            return jsonify({'success': False, 'error': 'Invalid recurrence end date format'}), 400
+    
     try:
-        result = message_scheduler.schedule_bulk_message(name, body, scheduled_dt, phone_numbers)
+        result = message_scheduler.schedule_bulk_message(
+            name=name,
+            body=body,
+            scheduled_at=scheduled_dt,
+            phone_numbers=phone_numbers,
+            is_recurring=is_recurring,
+            recurrence_type=recurrence_type,
+            recurrence_days=recurrence_days,
+            recurrence_end_date=recurrence_end_dt
+        )
         return jsonify({'success': True, 'scheduled': result})
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -507,6 +530,24 @@ def cancel_scheduled(message_id):
     if success:
         return jsonify({'success': True})
     return jsonify({'success': False, 'error': 'Could not cancel message'}), 400
+
+
+@app.route('/api/scheduled/<int:message_id>/pause', methods=['POST'])
+def pause_scheduled(message_id):
+    """Pause a recurring scheduled message"""
+    success = message_scheduler.pause_scheduled_message(message_id)
+    if success:
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': 'Could not pause message'}), 400
+
+
+@app.route('/api/scheduled/<int:message_id>/resume', methods=['POST'])
+def resume_scheduled(message_id):
+    """Resume a paused scheduled message"""
+    success = message_scheduler.resume_scheduled_message(message_id)
+    if success:
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': 'Could not resume message'}), 400
 
 
 # ============ API Routes - Templates ============

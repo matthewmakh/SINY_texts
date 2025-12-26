@@ -673,22 +673,65 @@ async function sendMessage() {
             return;
         }
         
-        // SAFETY: Confirmation for scheduling
-        const confirmed = confirm(`Schedule message to ${phoneNumbers.length} recipient(s)?\\n\\nThis will send at: ${new Date(datetime).toLocaleString()}`);
+        // Get recurring options
+        const isRecurring = document.getElementById('is-recurring').checked;
+        const recurrenceType = document.getElementById('recurrence-type').value;
+        const recurrenceEnd = document.getElementById('recurrence-end').value;
+        
+        // Get selected days for weekly
+        let recurrenceDays = null;
+        if (isRecurring && recurrenceType === 'weekly') {
+            const selectedDays = Array.from(
+                document.querySelectorAll('#weekly-days-group input:checked')
+            ).map(cb => cb.value);
+            
+            if (selectedDays.length === 0) {
+                showToast('Please select at least one day for weekly recurrence', 'error');
+                return;
+            }
+            recurrenceDays = selectedDays.join(',');
+        }
+        
+        // Build confirmation message
+        let confirmMsg = `Schedule message to ${phoneNumbers.length} recipient(s)?\\n\\nFirst send: ${new Date(datetime).toLocaleString()}`;
+        if (isRecurring) {
+            const recurrenceLabel = {
+                'daily': 'every day',
+                'weekly': `every ${recurrenceDays.split(',').join(', ')}`,
+                'monthly': 'every month (same day)'
+            }[recurrenceType];
+            confirmMsg += `\\nRepeats: ${recurrenceLabel}`;
+            if (recurrenceEnd) {
+                confirmMsg += `\\nUntil: ${new Date(recurrenceEnd).toLocaleDateString()}`;
+            }
+        }
+        
+        const confirmed = confirm(confirmMsg);
         if (!confirmed) return;
         
-        const response = await API.post('/scheduled', {
+        const scheduleData = {
             name,
             body,
             scheduled_at: new Date(datetime).toISOString(),
-            phone_numbers: phoneNumbers  // REQUIRED
-        });
+            phone_numbers: phoneNumbers,
+            is_recurring: isRecurring,
+            recurrence_type: isRecurring ? recurrenceType : null,
+            recurrence_days: recurrenceDays,
+            recurrence_end_date: recurrenceEnd ? new Date(recurrenceEnd + 'T23:59:59').toISOString() : null
+        };
+        
+        const response = await API.post('/scheduled', scheduleData);
         
         if (response.success) {
-            showToast(`Message scheduled to ${phoneNumbers.length} recipients`);
+            const recurText = isRecurring ? ' (recurring)' : '';
+            showToast(`Message scheduled to ${phoneNumbers.length} recipients${recurText}`);
             document.getElementById('message-body').value = '';
             document.getElementById('schedule-name').value = '';
             document.getElementById('schedule-datetime').value = '';
+            document.getElementById('is-recurring').checked = false;
+            document.getElementById('recurring-options').style.display = 'none';
+            document.querySelectorAll('#weekly-days-group input').forEach(cb => cb.checked = false);
+            document.getElementById('recurrence-end').value = '';
         } else {
             showToast(response.error || 'Failed to schedule', 'error');
         }
@@ -746,30 +789,106 @@ function renderScheduledList(scheduled) {
         return;
     }
     
-    container.innerHTML = scheduled.map(item => `
-        <div class="scheduled-item">
-            <div class="scheduled-info">
-                <h4>${item.name}</h4>
-                <p><i class="fas fa-calendar"></i> ${new Date(item.scheduled_at).toLocaleString()}</p>
-                <p><i class="fas fa-users"></i> ${item.total_recipients} recipients</p>
-                <p>${item.body.substring(0, 100)}${item.body.length > 100 ? '...' : ''}</p>
-                <span class="scheduled-status ${item.status}">${item.status}</span>
-            </div>
-            ${item.status === 'pending' ? `
-                <button class="btn btn-danger btn-sm cancel-scheduled" data-id="${item.id}">
-                    <i class="fas fa-times"></i> Cancel
+    container.innerHTML = scheduled.map(item => {
+        // Build recurrence info
+        let recurrenceInfo = '';
+        if (item.is_recurring) {
+            const typeLabel = {
+                'daily': 'Daily',
+                'weekly': `Weekly (${item.recurrence_days || 'every day'})`,
+                'monthly': 'Monthly'
+            }[item.recurrence_type] || item.recurrence_type;
+            
+            recurrenceInfo = `
+                <p><i class="fas fa-redo"></i> ${typeLabel}${item.send_count ? ` • Sent ${item.send_count} times` : ''}</p>
+            `;
+            
+            if (item.recurrence_end_date) {
+                recurrenceInfo += `<p style="font-size: 0.85em; color: var(--text-muted);"><i class="fas fa-stop-circle"></i> Ends ${new Date(item.recurrence_end_date).toLocaleDateString()}</p>`;
+            }
+        }
+        
+        // Build action buttons based on status
+        let actionButtons = '';
+        if (item.status === 'pending') {
+            if (item.is_recurring) {
+                actionButtons = `
+                    <button class="btn btn-secondary btn-sm pause-scheduled" data-id="${item.id}" title="Pause">
+                        <i class="fas fa-pause"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm cancel-scheduled" data-id="${item.id}" title="Cancel">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+            } else {
+                actionButtons = `
+                    <button class="btn btn-danger btn-sm cancel-scheduled" data-id="${item.id}">
+                        <i class="fas fa-times"></i> Cancel
+                    </button>
+                `;
+            }
+        } else if (item.status === 'paused') {
+            actionButtons = `
+                <button class="btn btn-primary btn-sm resume-scheduled" data-id="${item.id}" title="Resume">
+                    <i class="fas fa-play"></i> Resume
                 </button>
-            ` : ''}
-        </div>
-    `).join('');
+                <button class="btn btn-danger btn-sm cancel-scheduled" data-id="${item.id}" title="Cancel">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+        }
+        
+        return `
+            <div class="scheduled-item">
+                <div class="scheduled-info">
+                    <h4>${item.name} ${item.is_recurring ? '<i class="fas fa-redo" style="color: var(--primary-color); font-size: 0.8em;" title="Recurring"></i>' : ''}</h4>
+                    <p><i class="fas fa-calendar"></i> ${item.status === 'paused' ? 'Paused' : 'Next:'} ${new Date(item.scheduled_at).toLocaleString()}</p>
+                    <p><i class="fas fa-users"></i> ${item.total_recipients} recipients</p>
+                    ${recurrenceInfo}
+                    <p>${item.body.substring(0, 100)}${item.body.length > 100 ? '...' : ''}</p>
+                    <span class="scheduled-status ${item.status}">${item.status}</span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    ${actionButtons}
+                </div>
+            </div>
+        `;
+    }).join('');
     
     // Add cancel handlers
     container.querySelectorAll('.cancel-scheduled').forEach(btn => {
         btn.addEventListener('click', async () => {
+            if (!confirm('Are you sure you want to cancel this scheduled message?')) return;
             const response = await API.delete(`/scheduled/${btn.dataset.id}`);
             if (response.success) {
                 await loadScheduled();
                 showToast('Scheduled message cancelled');
+            }
+        });
+    });
+    
+    // Add pause handlers
+    container.querySelectorAll('.pause-scheduled').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const response = await API.post(`/scheduled/${btn.dataset.id}/pause`);
+            if (response.success) {
+                await loadScheduled();
+                showToast('Schedule paused');
+            } else {
+                showToast(response.error || 'Failed to pause', 'error');
+            }
+        });
+    });
+    
+    // Add resume handlers
+    container.querySelectorAll('.resume-scheduled').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const response = await API.post(`/scheduled/${btn.dataset.id}/resume`);
+            if (response.success) {
+                await loadScheduled();
+                showToast('Schedule resumed');
+            } else {
+                showToast(response.error || 'Failed to resume', 'error');
             }
         });
     });
@@ -914,6 +1033,18 @@ function initEventListeners() {
         document.getElementById('send-message-btn').innerHTML = e.target.checked
             ? '<i class="fas fa-clock"></i> Schedule'
             : '<i class="fas fa-paper-plane"></i> Send Now';
+    });
+    
+    // Recurring toggle
+    document.getElementById('is-recurring').addEventListener('change', (e) => {
+        document.getElementById('recurring-options').style.display = 
+            e.target.checked ? 'block' : 'none';
+    });
+    
+    // Recurrence type toggle (show/hide weekly days)
+    document.getElementById('recurrence-type').addEventListener('change', (e) => {
+        document.getElementById('weekly-days-group').style.display = 
+            e.target.value === 'weekly' ? 'block' : 'none';
     });
     
     // Message body character count
