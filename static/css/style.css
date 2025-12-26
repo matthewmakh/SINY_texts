@@ -1471,3 +1471,46 @@ body {
     width: 80px;
     border-radius: var(--radius);
 }
+
+/* Skeleton Contact Picker */
+.skeleton-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.skeleton-picker-checkbox {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+}
+
+.skeleton-picker-info {
+    flex: 1;
+}
+
+.skeleton-picker-name {
+    height: 16px;
+    width: 140px;
+    margin-bottom: 6px;
+    border-radius: 4px;
+}
+
+.skeleton-picker-details {
+    display: flex;
+    gap: 12px;
+}
+
+.skeleton-picker-phone {
+    height: 12px;
+    width: 100px;
+    border-radius: 4px;
+}
+
+.skeleton-picker-role {
+    height: 12px;
+    width: 60px;
+    border-radius: 4px;
+}

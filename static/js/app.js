@@ -170,6 +170,31 @@ function showConversationsSkeleton() {
     `).join('');
 }
 
+function showContactPickerSkeleton() {
+    const container = document.getElementById('contact-picker-list');
+    const countDisplay = document.getElementById('contact-picker-filtered-count');
+    if (!container) return;
+    
+    // Show loading in count display
+    if (countDisplay) {
+        countDisplay.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Loading contacts...</span>';
+    }
+    
+    // Show skeleton items
+    container.innerHTML = Array(6).fill(0).map(() => `
+        <div class="skeleton-picker-item">
+            <div class="skeleton skeleton-picker-checkbox"></div>
+            <div class="skeleton-picker-info">
+                <div class="skeleton skeleton-picker-name"></div>
+                <div class="skeleton-picker-details">
+                    <div class="skeleton skeleton-picker-phone"></div>
+                    <div class="skeleton skeleton-picker-role"></div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
 function showContactsSkeleton() {
     const tbody = document.getElementById('contacts-table-body');
     if (!tbody) return;
@@ -698,11 +723,16 @@ const MAX_RECIPIENTS = 50;
 // Store all contacts for the picker
 let allComposeContacts = [];
 let selectedContactPhones = new Set();
+let contactsLoading = false;
 
 async function loadComposeView() {
+    // Show skeleton in picker if it's open
+    contactsLoading = true;
+    
     // Load contacts for selector (mobile only for SMS)
     const response = await API.get('/contacts?mobile_only=true&limit=500');
     allComposeContacts = response.success ? response.contacts : [];
+    contactsLoading = false;
     
     // Load templates
     await loadTemplates();
@@ -730,7 +760,12 @@ function populateRoleFilter() {
 }
 
 function openContactPicker() {
-    renderContactPickerList();
+    // Show skeleton if contacts are loading or not yet loaded
+    if (contactsLoading || allComposeContacts.length === 0) {
+        showContactPickerSkeleton();
+    } else {
+        renderContactPickerList();
+    }
     showModal('contact-picker-modal');
 }
 
