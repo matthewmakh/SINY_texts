@@ -734,6 +734,12 @@ async function loadComposeView() {
     allComposeContacts = response.success ? response.contacts : [];
     contactsLoading = false;
     
+    // If contact picker is open, refresh it now that contacts are loaded
+    const pickerModal = document.getElementById('contact-picker-modal');
+    if (pickerModal && pickerModal.classList.contains('active')) {
+        renderContactPickerList();
+    }
+    
     // Load templates
     await loadTemplates();
     
