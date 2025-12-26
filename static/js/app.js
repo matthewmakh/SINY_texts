@@ -695,11 +695,14 @@ async function sendMessage() {
         // Build confirmation message
         let confirmMsg = `Schedule message to ${phoneNumbers.length} recipient(s)?\\n\\nFirst send: ${new Date(datetime).toLocaleString()}`;
         if (isRecurring) {
-            const recurrenceLabel = {
-                'daily': 'every day',
-                'weekly': `every ${recurrenceDays.split(',').join(', ')}`,
-                'monthly': 'every month (same day)'
-            }[recurrenceType];
+            let recurrenceLabel;
+            if (recurrenceType === 'daily') {
+                recurrenceLabel = 'every day';
+            } else if (recurrenceType === 'weekly') {
+                recurrenceLabel = `every ${recurrenceDays.split(',').join(', ')}`;
+            } else if (recurrenceType === 'monthly') {
+                recurrenceLabel = 'every month (same day)';
+            }
             confirmMsg += `\\nRepeats: ${recurrenceLabel}`;
             if (recurrenceEnd) {
                 confirmMsg += `\\nUntil: ${new Date(recurrenceEnd).toLocaleDateString()}`;
