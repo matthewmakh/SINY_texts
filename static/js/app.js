@@ -775,7 +775,7 @@ function openContactPicker() {
     showModal('contact-picker-modal');
 }
 
-function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter = '', mobileOnly = true) {
+function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter = '') {
     const container = document.getElementById('contact-picker-list');
     const countDisplay = document.getElementById('contact-picker-filtered-count');
     if (!container) return;
@@ -785,16 +785,10 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
         searchTerm = document.getElementById('contact-picker-search')?.value || '';
         roleFilter = document.getElementById('contact-picker-role-filter')?.value || '';
         boroughFilter = document.getElementById('contact-picker-borough-filter')?.value || '';
-        mobileOnly = document.getElementById('contact-picker-mobile-only')?.checked ?? true;
     }
     
     // Filter contacts
     let filtered = allComposeContacts;
-    
-    // Mobile only filter
-    if (mobileOnly) {
-        filtered = filtered.filter(c => c.is_mobile !== false);
-    }
     
     if (searchTerm) {
         const term = searchTerm.toLowerCase();
@@ -892,8 +886,7 @@ function applyContactPickerFilters() {
     const searchTerm = document.getElementById('contact-picker-search')?.value || '';
     const roleFilter = document.getElementById('contact-picker-role-filter')?.value || '';
     const boroughFilter = document.getElementById('contact-picker-borough-filter')?.value || '';
-    const mobileOnly = document.getElementById('contact-picker-mobile-only')?.checked ?? true;
-    renderContactPickerList(searchTerm, roleFilter, boroughFilter, mobileOnly);
+    renderContactPickerList(searchTerm, roleFilter, boroughFilter);
 }
 
 function confirmContactSelection() {
@@ -1436,11 +1429,6 @@ function initEventListeners() {
     
     // Contact Picker Borough Filter
     document.getElementById('contact-picker-borough-filter')?.addEventListener('change', (e) => {
-        applyContactPickerFilters();
-    });
-    
-    // Contact Picker Mobile Only
-    document.getElementById('contact-picker-mobile-only')?.addEventListener('change', (e) => {
         applyContactPickerFilters();
     });
     
