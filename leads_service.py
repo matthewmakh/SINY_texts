@@ -135,10 +135,36 @@ def search_contacts(search: str = None, mobile_only: bool = True, limit: int = 1
 
 
 def get_contact_by_phone(phone: str):
-    """Get a contact by phone number"""
+    """Get a contact by phone number - checks leads DB and manual contacts"""
+    import phonenumbers
+    from database import get_session, ManualContact
+    
+    # First normalize the phone
+    try:
+        parsed = phonenumbers.parse(phone, "US")
+        if phonenumbers.is_valid_number(parsed):
+            normalized = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+        else:
+            normalized = phone
+    except:
+        normalized = phone
+    
+    # Check manual contacts first (local DB)
+    session = get_session()
+    try:
+        manual = session.query(ManualContact).filter(
+            ManualContact.phone_number == normalized
+        ).first()
+        
+        if manual:
+            return manual.to_dict()
+    finally:
+        session.close()
+    
+    # Then check leads database
     engine = get_leads_engine()
     
-    # Normalize the phone for comparison
+    # Extract digits for leads DB comparison
     digits = ''.join(c for c in str(phone) if c.isdigit())
     if len(digits) == 11 and digits.startswith('1'):
         digits = digits[1:]  # Remove leading 1
@@ -251,47 +277,84 @@ def get_all_contacts(search: str = None, mobile_only: bool = True, source: str =
 
 
 def get_contacts_by_phones(phones: list):
-    """Get multiple contacts by their phone numbers"""
+    """Get multiple contacts by their phone numbers - checks leads DB and manual contacts"""
     if not phones:
         return []
     
-    engine = get_leads_engine()
+    import phonenumbers
+    from database import get_session, ManualContact
     
-    # Normalize phones for comparison
-    normalized = []
+    results = []
+    found_phones = set()
+    
+    # Normalize all phones first
+    normalized_phones = []
     for phone in phones:
-        digits = ''.join(c for c in str(phone) if c.isdigit())
-        if len(digits) == 11 and digits.startswith('1'):
-            digits = digits[1:]
-        normalized.append(digits)
+        try:
+            parsed = phonenumbers.parse(phone, "US")
+            if phonenumbers.is_valid_number(parsed):
+                normalized_phones.append(phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164))
+            else:
+                normalized_phones.append(phone)
+        except:
+            normalized_phones.append(phone)
     
-    placeholders = ','.join([f"'{p}'" for p in normalized])
-    
-    query = f"""
-        SELECT 
-            c.id,
-            c.name,
-            c.phone,
-            c.role,
-            c.is_mobile,
-            c.carrier_name,
-            p.permit_no,
-            p.address,
-            p.owner_business_name as company
-        FROM contacts c
-        LEFT JOIN permit_contacts pc ON c.id = pc.contact_id
-        LEFT JOIN permits p ON pc.permit_id = p.id
-        WHERE c.phone IN ({placeholders})
-    """
-    
-    with engine.connect() as conn:
-        result = conn.execute(text(query))
-        contacts = [dict(row._mapping) for row in result]
+    # Check manual contacts first (local DB)
+    session = get_session()
+    try:
+        manual_contacts = session.query(ManualContact).filter(
+            ManualContact.phone_number.in_(normalized_phones)
+        ).all()
         
-        for c in contacts:
-            c['phone_normalized'] = normalize_phone(c['phone'])
+        for mc in manual_contacts:
+            results.append(mc.to_dict())
+            found_phones.add(mc.phone_number)
+    finally:
+        session.close()
+    
+    # Then check leads database for remaining phones
+    remaining_phones = [p for p in phones if normalize_phone(p) not in found_phones]
+    
+    if remaining_phones:
+        engine = get_leads_engine()
         
-        return contacts
+        # Normalize phones for comparison
+        normalized = []
+        for phone in remaining_phones:
+            digits = ''.join(c for c in str(phone) if c.isdigit())
+            if len(digits) == 11 and digits.startswith('1'):
+                digits = digits[1:]
+            normalized.append(digits)
+        
+        placeholders = ','.join([f"'{p}'" for p in normalized])
+        
+        query = f"""
+            SELECT 
+                c.id,
+                c.name,
+                c.phone,
+                c.role,
+                c.is_mobile,
+                c.carrier_name,
+                p.permit_no,
+                p.address,
+                p.owner_business_name as company
+            FROM contacts c
+            LEFT JOIN permit_contacts pc ON c.id = pc.contact_id
+            LEFT JOIN permits p ON pc.permit_id = p.id
+            WHERE c.phone IN ({placeholders})
+        """
+        
+        with engine.connect() as conn:
+            result = conn.execute(text(query))
+            contacts = [dict(row._mapping) for row in result]
+            
+            for c in contacts:
+                c['phone_normalized'] = normalize_phone(c['phone'])
+            
+            results.extend(contacts)
+    
+    return results
 
 
 def get_total_contact_count(mobile_only: bool = True, source: str = 'all'):
