@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
 import logging
+import phonenumbers
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 
@@ -9,6 +10,25 @@ from database import get_session, Message, MessageStatus, MessageDirection
 from leads_service import get_contact_by_phone, get_contacts_by_phones
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_phone(phone: str, default_region: str = "US") -> str:
+    """
+    Normalize phone number to E.164 format (+1XXXXXXXXXX for US numbers).
+    Uses Google's libphonenumber for robust parsing.
+    """
+    if not phone:
+        return phone
+    
+    try:
+        parsed = phonenumbers.parse(phone, default_region)
+        if phonenumbers.is_valid_number(parsed):
+            return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+    except phonenumbers.NumberParseException:
+        pass
+    
+    # Fallback: return original if can't parse
+    return phone
 
 
 class TwilioService:
@@ -35,9 +55,12 @@ class TwilioService:
         """Send a single SMS message"""
         session = get_session()
         
+        # Normalize phone number for consistent storage
+        normalized_phone = normalize_phone(to_number)
+        
         # Create message record
         message = Message(
-            phone_number=to_number,
+            phone_number=normalized_phone,
             body=body,
             direction=MessageDirection.OUTBOUND.value,
             status=MessageStatus.PENDING.value
@@ -50,7 +73,7 @@ class TwilioService:
             message_params = {
                 'body': body,
                 'from_': self.from_number,
-                'to': to_number,
+                'to': normalized_phone,
             }
             
             # Only add status callback if we have a valid URL
@@ -161,12 +184,16 @@ class TwilioService:
     def get_conversation_messages(self, phone_number: str) -> list:
         """Get all messages for a specific conversation"""
         session = get_session()
+        
+        # Normalize to match stored format
+        normalized_phone = normalize_phone(phone_number)
+        
         messages = session.query(Message).filter(
-            Message.phone_number == phone_number
+            Message.phone_number == normalized_phone
         ).order_by(Message.created_at.asc()).all()
         
         # Get contact info once
-        contact = get_contact_by_phone(phone_number)
+        contact = get_contact_by_phone(normalized_phone)
         
         result = [m.to_dict(contact=contact) for m in messages]
         session.close()
@@ -176,9 +203,12 @@ class TwilioService:
         """Process and store an incoming SMS message"""
         session = get_session()
         
+        # Normalize phone number for consistent storage
+        normalized_phone = normalize_phone(from_number)
+        
         message = Message(
             twilio_sid=twilio_sid,
-            phone_number=from_number,
+            phone_number=normalized_phone,
             body=body,
             direction=MessageDirection.INBOUND.value,
             status=MessageStatus.RECEIVED.value,
@@ -189,7 +219,7 @@ class TwilioService:
         session.commit()
         
         # Get contact info from leads DB
-        contact = get_contact_by_phone(from_number)
+        contact = get_contact_by_phone(normalized_phone)
         result = message.to_dict(contact=contact)
         session.close()
         return result
