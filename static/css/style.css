@@ -954,6 +954,45 @@ body {
     }
 }
 
+/* Contact Picker Pagination */
+.contact-picker-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color);
+    background: #f8fafc;
+    gap: 12px;
+}
+
+.pagination-info {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pagination-current {
+    font-size: 0.85rem;
+    color: var(--text-color);
+    min-width: 100px;
+    text-align: center;
+}
+
+.pagination-controls .btn {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+}
+
+.pagination-controls .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .contact-picker-list {
     max-height: 350px;
     overflow-y: auto;

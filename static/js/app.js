@@ -724,13 +724,16 @@ const MAX_RECIPIENTS = 50;
 let allComposeContacts = [];
 let selectedContactPhones = new Set();
 let contactsLoading = false;
+let contactPickerPage = 1;
+const CONTACTS_PER_PAGE = 500;
 
 async function loadComposeView() {
     // Show skeleton in picker if it's open
     contactsLoading = true;
+    contactPickerPage = 1;
     
-    // Load contacts for selector (mobile only for SMS)
-    const response = await API.get('/contacts?mobile_only=true&limit=500');
+    // Load contacts for selector (mobile only for SMS) - no limit to get all
+    const response = await API.get('/contacts?mobile_only=true&limit=100000');
     allComposeContacts = response.success ? response.contacts : [];
     contactsLoading = false;
     
@@ -899,10 +902,18 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
                 <p>No contacts found</p>
             </div>
         `;
+        renderContactPickerPagination(0, 0);
         return;
     }
     
-    container.innerHTML = filtered.map(c => {
+    // Pagination
+    const totalPages = Math.ceil(filtered.length / CONTACTS_PER_PAGE);
+    if (contactPickerPage > totalPages) contactPickerPage = 1;
+    const startIdx = (contactPickerPage - 1) * CONTACTS_PER_PAGE;
+    const endIdx = startIdx + CONTACTS_PER_PAGE;
+    const pageContacts = filtered.slice(startIdx, endIdx);
+    
+    container.innerHTML = pageContacts.map(c => {
         const isSelected = selectedContactPhones.has(c.phone_number);
         
         // Smart name display: use name, fall back to company if name is NA/N/A/empty
@@ -937,6 +948,9 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
         `;
     }).join('');
     
+    // Render pagination
+    renderContactPickerPagination(filtered.length, totalPages);
+    
     // Add click handlers
     container.querySelectorAll('.contact-picker-item').forEach(item => {
         item.addEventListener('click', (e) => {
@@ -964,6 +978,58 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
     updatePickerCount();
 }
 
+function renderContactPickerPagination(totalContacts, totalPages) {
+    let paginationContainer = document.getElementById('contact-picker-pagination');
+    if (!paginationContainer) {
+        // Create pagination container if doesn't exist
+        const listContainer = document.getElementById('contact-picker-list');
+        if (listContainer) {
+            paginationContainer = document.createElement('div');
+            paginationContainer.id = 'contact-picker-pagination';
+            paginationContainer.className = 'contact-picker-pagination';
+            listContainer.parentNode.insertBefore(paginationContainer, listContainer.nextSibling);
+        }
+    }
+    
+    if (!paginationContainer || totalPages <= 1) {
+        if (paginationContainer) paginationContainer.innerHTML = '';
+        return;
+    }
+    
+    const startItem = (contactPickerPage - 1) * CONTACTS_PER_PAGE + 1;
+    const endItem = Math.min(contactPickerPage * CONTACTS_PER_PAGE, totalContacts);
+    
+    paginationContainer.innerHTML = `
+        <div class="pagination-info">
+            Showing ${startItem.toLocaleString()}-${endItem.toLocaleString()} of ${totalContacts.toLocaleString()}
+        </div>
+        <div class="pagination-controls">
+            <button class="btn btn-sm" ${contactPickerPage === 1 ? 'disabled' : ''} data-page="prev">
+                <i class="fas fa-chevron-left"></i> Prev
+            </button>
+            <span class="pagination-current">Page ${contactPickerPage} of ${totalPages}</span>
+            <button class="btn btn-sm" ${contactPickerPage === totalPages ? 'disabled' : ''} data-page="next">
+                Next <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    `;
+    
+    // Add pagination click handlers
+    paginationContainer.querySelectorAll('button[data-page]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (btn.disabled) return;
+            if (btn.dataset.page === 'prev') {
+                contactPickerPage--;
+            } else if (btn.dataset.page === 'next') {
+                contactPickerPage++;
+            }
+            applyContactPickerFilters(false); // Don't reset page
+            // Scroll to top of list
+            document.getElementById('contact-picker-list')?.scrollTo(0, 0);
+        });
+    });
+}
+
 function updatePickerCount() {
     const countEl = document.getElementById('contact-picker-count');
     if (countEl) {
@@ -973,7 +1039,8 @@ function updatePickerCount() {
     }
 }
 
-function applyContactPickerFilters() {
+function applyContactPickerFilters(resetPage = true) {
+    if (resetPage) contactPickerPage = 1; // Reset to page 1 when filters change
     const searchTerm = document.getElementById('contact-picker-search')?.value || '';
     const roleFilter = document.getElementById('contact-picker-role-filter')?.value || '';
     const boroughFilter = document.getElementById('contact-picker-borough-filter')?.value || '';
