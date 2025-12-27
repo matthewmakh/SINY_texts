@@ -902,19 +902,47 @@ body {
     font-size: 0.85rem;
     color: var(--text-secondary);
     display: flex;
-    gap: 12px;
+    gap: 8px;
     flex-wrap: wrap;
+    margin-top: 2px;
 }
 
 .contact-picker-item-phone {
     font-family: monospace;
+    color: var(--text-primary);
+}
+
+.contact-picker-item-company {
+    color: var(--text-secondary);
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contact-picker-item-address {
+    color: #6b7280;
+    font-size: 0.8rem;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contact-picker-item-tags {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+    flex-wrap: wrap;
 }
 
 .contact-picker-item-role {
-    background: var(--border-color);
+    background: #f3f4f6;
+    color: #374151;
     padding: 2px 8px;
     border-radius: 4px;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
+    font-weight: 500;
 }
 
 .contact-picker-item-borough {
@@ -922,7 +950,17 @@ body {
     color: #1e40af;
     padding: 2px 8px;
     border-radius: 4px;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+}
+
+.contact-picker-item-manual {
+    background: #dcfce7;
+    color: #166534;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 500;
 }
 
 .contact-picker-summary {

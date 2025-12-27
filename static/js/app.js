@@ -830,16 +830,33 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
     
     container.innerHTML = filtered.map(c => {
         const isSelected = selectedContactPhones.has(c.phone_number);
+        
+        // Smart name display: use name, fall back to company if name is NA/N/A/empty
+        let displayName = c.name;
+        const isNameEmpty = !displayName || displayName === 'NA' || displayName === 'N/A' || displayName === 'null' || displayName.trim() === '';
+        if (isNameEmpty && c.company) {
+            displayName = c.company;
+        } else if (isNameEmpty) {
+            displayName = 'Unknown';
+        }
+        
+        // Show company only if different from display name
+        const showCompany = c.company && c.company !== displayName && c.company !== 'N/A' && c.company !== 'None';
+        
         return `
             <div class="contact-picker-item ${isSelected ? 'selected' : ''}" data-phone="${c.phone_number}">
                 <input type="checkbox" ${isSelected ? 'checked' : ''}>
                 <div class="contact-picker-item-info">
-                    <div class="contact-picker-item-name">${c.name || 'Unknown'}</div>
+                    <div class="contact-picker-item-name">${displayName}</div>
                     <div class="contact-picker-item-details">
                         <span class="contact-picker-item-phone">${c.phone_number}</span>
-                        ${c.company ? `<span>${c.company}</span>` : ''}
+                        ${showCompany ? `<span class="contact-picker-item-company">${c.company}</span>` : ''}
+                        ${c.address ? `<span class="contact-picker-item-address">${c.address}</span>` : ''}
+                    </div>
+                    <div class="contact-picker-item-tags">
                         ${c.role ? `<span class="contact-picker-item-role">${c.role}</span>` : ''}
                         ${c.borough ? `<span class="contact-picker-item-borough">${c.borough}</span>` : ''}
+                        ${c.source === 'manual' ? `<span class="contact-picker-item-manual">Manual</span>` : ''}
                     </div>
                 </div>
             </div>
