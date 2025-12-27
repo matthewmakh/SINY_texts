@@ -216,8 +216,7 @@ def get_conversation(phone):
 @app.route('/api/contacts', methods=['GET'])
 def get_contacts():
     """
-    Get contacts directly from the leads database (live query).
-    No local storage - always fresh data from the source.
+    Get contacts from leads database AND manual contacts.
     """
     search = request.args.get('search', '')
     mobile_only = request.args.get('mobile_only', 'true').lower() == 'true'
@@ -228,6 +227,7 @@ def get_contacts():
     role = request.args.get('role', '')  # Owner, Permittee
     
     try:
+        # Get leads database contacts
         contacts = get_all_contacts(
             search=search if search else None,
             mobile_only=mobile_only,
@@ -238,12 +238,17 @@ def get_contacts():
             role=role if role else None
         )
         
-        # Format for frontend
+        # Format leads contacts for frontend
         result = []
+        seen_phones = set()
+        
         for c in contacts:
+            phone = c.get('phone_normalized')
+            if phone:
+                seen_phones.add(phone)
             result.append({
                 'id': c.get('id'),
-                'phone_number': c.get('phone_normalized'),
+                'phone_number': phone,
                 'name': c.get('name'),
                 'company': c.get('company'),
                 'permit_number': c.get('permit_no'),
@@ -254,12 +259,50 @@ def get_contacts():
                 'borough': c.get('borough')
             })
         
+        # Also include manual contacts (filter by search if provided)
+        session = get_session()
+        try:
+            manual_query = session.query(ManualContact)
+            if search:
+                search_term = f'%{search}%'
+                manual_query = manual_query.filter(
+                    (ManualContact.name.ilike(search_term)) |
+                    (ManualContact.phone_number.ilike(search_term)) |
+                    (ManualContact.company.ilike(search_term))
+                )
+            if role:
+                manual_query = manual_query.filter(ManualContact.role == role)
+            
+            manual_contacts = manual_query.all()
+            
+            for mc in manual_contacts:
+                # Skip if already in leads results (dedupe by phone)
+                if mc.phone_number in seen_phones:
+                    continue
+                seen_phones.add(mc.phone_number)
+                result.append({
+                    'id': f'manual_{mc.id}',
+                    'phone_number': mc.phone_number,
+                    'name': mc.name,
+                    'company': mc.company,
+                    'permit_number': None,
+                    'address': None,
+                    'role': mc.role,
+                    'source': 'manual',
+                    'is_mobile': True,  # Assume manual contacts are mobile
+                    'borough': None
+                })
+        finally:
+            session.close()
+        
         total = get_total_contact_count(
             mobile_only=mobile_only, 
             source=source,
             borough=borough if borough else None,
             role=role if role else None
         )
+        # Add manual contacts to total
+        total += len([r for r in result if r.get('source') == 'manual'])
         
         return jsonify({
             'success': True, 
