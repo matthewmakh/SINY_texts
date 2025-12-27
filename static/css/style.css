@@ -1127,7 +1127,41 @@ body {
     gap: 12px;
 }
 
-/* ============ Toast ============ */\n.toast {\n    position: fixed;\n    bottom: 24px;\n    right: 24px;\n    padding: 16px 24px;\n    background: var(--text-primary);\n    color: white;\n    border-radius: var(--radius);\n    box-shadow: var(--shadow-lg);\n    transform: translateY(100px) scale(0.9);\n    opacity: 0;\n    transition: var(--transition-smooth);\n    z-index: 2000;\n}\n\n.toast.show {\n    transform: translateY(0) scale(1);\n    opacity: 1;\n    animation: toastSlide 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);\n}\n\n@keyframes toastSlide {\n    0% {\n        transform: translateY(100px) scale(0.9);\n        opacity: 0;\n    }\n    100% {\n        transform: translateY(0) scale(1);\n        opacity: 1;\n    }\n}\n\n.toast.success { background: var(--success-color); }\n.toast.error { background: var(--danger-color); }
+/* ============ Toast ============ */
+.toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 16px 24px;
+    background: var(--text-primary);
+    color: white;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    transform: translateY(100px) scale(0.9);
+    opacity: 0;
+    transition: var(--transition-smooth);
+    z-index: 2000;
+}
+
+.toast.show {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    animation: toastSlide 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes toastSlide {
+    0% {
+        transform: translateY(100px) scale(0.9);
+        opacity: 0;
+    }
+    100% {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+    }
+}
+
+.toast.success { background: var(--success-color); }
+.toast.error { background: var(--danger-color); }
 
 /* ============ Empty State ============ */
 .empty-state {
