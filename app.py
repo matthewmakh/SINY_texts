@@ -226,6 +226,16 @@ def get_contacts():
     borough = request.args.get('borough', '')  # MANHATTAN, BROOKLYN, etc.
     role = request.args.get('role', '')  # Owner, Permittee
     
+    # Advanced filters
+    neighborhood = request.args.get('neighborhood', '')
+    zip_code = request.args.get('zip_code', '')
+    job_type = request.args.get('job_type', '')
+    work_type = request.args.get('work_type', '')
+    permit_type = request.args.get('permit_type', '')
+    permit_status = request.args.get('permit_status', '')
+    bldg_type = request.args.get('bldg_type', '')
+    residential = request.args.get('residential', '')
+    
     try:
         # Get leads database contacts
         contacts = get_all_contacts(
@@ -235,7 +245,15 @@ def get_contacts():
             limit=limit,
             offset=offset,
             borough=borough if borough else None,
-            role=role if role else None
+            role=role if role else None,
+            neighborhood=neighborhood if neighborhood else None,
+            zip_code=zip_code if zip_code else None,
+            job_type=job_type if job_type else None,
+            work_type=work_type if work_type else None,
+            permit_type=permit_type if permit_type else None,
+            permit_status=permit_status if permit_status else None,
+            bldg_type=bldg_type if bldg_type else None,
+            residential=residential if residential else None
         )
         
         # Format leads contacts for frontend
@@ -256,44 +274,56 @@ def get_contacts():
                 'role': c.get('role'),
                 'source': c.get('source', c.get('contact_source')),
                 'is_mobile': c.get('is_mobile', True),
-                'borough': c.get('borough')
+                'borough': c.get('borough'),
+                'neighborhood': c.get('neighborhood'),
+                'zip_code': c.get('zip_code'),
+                'job_type': c.get('job_type'),
+                'work_type': c.get('work_type'),
+                'permit_type': c.get('permit_type'),
+                'permit_status': c.get('permit_status'),
+                'bldg_type': c.get('bldg_type'),
+                'residential': c.get('residential')
             })
         
         # Also include manual contacts (filter by search if provided)
-        session = get_session()
-        try:
-            manual_query = session.query(ManualContact)
-            if search:
-                search_term = f'%{search}%'
-                manual_query = manual_query.filter(
-                    (ManualContact.name.ilike(search_term)) |
-                    (ManualContact.phone_number.ilike(search_term)) |
-                    (ManualContact.company.ilike(search_term))
-                )
-            if role:
-                manual_query = manual_query.filter(ManualContact.role == role)
-            
-            manual_contacts = manual_query.all()
-            
-            for mc in manual_contacts:
-                # Skip if already in leads results (dedupe by phone)
-                if mc.phone_number in seen_phones:
-                    continue
-                seen_phones.add(mc.phone_number)
-                result.append({
-                    'id': f'manual_{mc.id}',
-                    'phone_number': mc.phone_number,
-                    'name': mc.name,
-                    'company': mc.company,
-                    'permit_number': None,
-                    'address': None,
-                    'role': mc.role,
-                    'source': 'manual',
-                    'is_mobile': True,  # Assume manual contacts are mobile
-                    'borough': None
-                })
-        finally:
-            session.close()
+        # Only include if no advanced filters are set (manual contacts don't have permit data)
+        has_advanced_filters = any([neighborhood, zip_code, job_type, work_type, permit_type, permit_status, bldg_type, residential])
+        
+        if not has_advanced_filters:
+            session = get_session()
+            try:
+                manual_query = session.query(ManualContact)
+                if search:
+                    search_term = f'%{search}%'
+                    manual_query = manual_query.filter(
+                        (ManualContact.name.ilike(search_term)) |
+                        (ManualContact.phone_number.ilike(search_term)) |
+                        (ManualContact.company.ilike(search_term))
+                    )
+                if role:
+                    manual_query = manual_query.filter(ManualContact.role == role)
+                
+                manual_contacts = manual_query.all()
+                
+                for mc in manual_contacts:
+                    # Skip if already in leads results (dedupe by phone)
+                    if mc.phone_number in seen_phones:
+                        continue
+                    seen_phones.add(mc.phone_number)
+                    result.append({
+                        'id': f'manual_{mc.id}',
+                        'phone_number': mc.phone_number,
+                        'name': mc.name,
+                        'company': mc.company,
+                        'permit_number': None,
+                        'address': None,
+                        'role': mc.role,
+                        'source': 'manual',
+                        'is_mobile': True,  # Assume manual contacts are mobile
+                        'borough': None
+                    })
+            finally:
+                session.close()
         
         total = get_total_contact_count(
             mobile_only=mobile_only, 
@@ -321,6 +351,50 @@ def get_contacts_stats():
     try:
         stats = get_leads_stats()
         return jsonify({'success': True, 'stats': stats})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/contacts/filter-options', methods=['GET'])
+def get_filter_options():
+    """Get available filter options (neighborhoods, zip codes) from permits database"""
+    try:
+        from leads_service import get_leads_engine
+        from sqlalchemy import text
+        
+        engine = get_leads_engine()
+        with engine.connect() as conn:
+            # Get neighborhoods (nta_name) - top 50 by count
+            neighborhoods = []
+            result = conn.execute(text("""
+                SELECT nta_name, COUNT(*) as cnt 
+                FROM permits 
+                WHERE nta_name IS NOT NULL AND nta_name != '' 
+                GROUP BY nta_name 
+                ORDER BY cnt DESC 
+                LIMIT 50
+            """))
+            for row in result:
+                neighborhoods.append({'value': row.nta_name, 'label': row.nta_name, 'count': row.cnt})
+            
+            # Get zip codes - top 50 by count
+            zip_codes = []
+            result = conn.execute(text("""
+                SELECT zip_code, COUNT(*) as cnt 
+                FROM permits 
+                WHERE zip_code IS NOT NULL AND zip_code != '' 
+                GROUP BY zip_code 
+                ORDER BY cnt DESC 
+                LIMIT 50
+            """))
+            for row in result:
+                zip_codes.append({'value': row.zip_code, 'label': row.zip_code, 'count': row.cnt})
+        
+        return jsonify({
+            'success': True,
+            'neighborhoods': neighborhoods,
+            'zip_codes': zip_codes
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

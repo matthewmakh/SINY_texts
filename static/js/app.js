@@ -751,9 +751,35 @@ async function loadComposeView() {
     // Populate role filter
     populateRoleFilter();
     
+    // Load filter options (neighborhoods, zip codes)
+    loadFilterOptions();
+    
     // Render chips
     renderSelectedChips();
     updateSelectedCount();
+}
+
+async function loadFilterOptions() {
+    try {
+        const response = await API.get('/contacts/filter-options');
+        if (response.success) {
+            // Populate neighborhoods
+            const neighborhoodSelect = document.getElementById('contact-picker-neighborhood-filter');
+            if (neighborhoodSelect && response.neighborhoods) {
+                neighborhoodSelect.innerHTML = '<option value="">All Neighborhoods</option>' +
+                    response.neighborhoods.map(n => `<option value="${n.value}">${n.label}</option>`).join('');
+            }
+            
+            // Populate zip codes
+            const zipSelect = document.getElementById('contact-picker-zip-filter');
+            if (zipSelect && response.zip_codes) {
+                zipSelect.innerHTML = '<option value="">All Zip Codes</option>' +
+                    response.zip_codes.map(z => `<option value="${z.value}">${z.label}</option>`).join('');
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load filter options:', e);
+    }
 }
 
 function populateRoleFilter() {
@@ -775,6 +801,24 @@ function openContactPicker() {
     showModal('contact-picker-modal');
 }
 
+function getAdvancedFilters() {
+    return {
+        neighborhood: document.getElementById('contact-picker-neighborhood-filter')?.value || '',
+        zip_code: document.getElementById('contact-picker-zip-filter')?.value || '',
+        job_type: document.getElementById('contact-picker-jobtype-filter')?.value || '',
+        work_type: document.getElementById('contact-picker-worktype-filter')?.value || '',
+        permit_type: document.getElementById('contact-picker-permittype-filter')?.value || '',
+        permit_status: document.getElementById('contact-picker-status-filter')?.value || '',
+        bldg_type: document.getElementById('contact-picker-bldgtype-filter')?.value || '',
+        residential: document.getElementById('contact-picker-residential-filter')?.value || ''
+    };
+}
+
+function hasAdvancedFilters() {
+    const filters = getAdvancedFilters();
+    return Object.values(filters).some(v => v !== '');
+}
+
 function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter = '') {
     const container = document.getElementById('contact-picker-list');
     const countDisplay = document.getElementById('contact-picker-filtered-count');
@@ -786,6 +830,9 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
         roleFilter = document.getElementById('contact-picker-role-filter')?.value || '';
         boroughFilter = document.getElementById('contact-picker-borough-filter')?.value || '';
     }
+    
+    // Get advanced filters
+    const advFilters = getAdvancedFilters();
     
     // Filter contacts
     let filtered = allComposeContacts;
@@ -807,11 +854,38 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
         filtered = filtered.filter(c => c.borough === boroughFilter);
     }
     
+    // Apply advanced filters
+    if (advFilters.neighborhood) {
+        filtered = filtered.filter(c => c.neighborhood === advFilters.neighborhood);
+    }
+    if (advFilters.zip_code) {
+        filtered = filtered.filter(c => c.zip_code === advFilters.zip_code);
+    }
+    if (advFilters.job_type) {
+        filtered = filtered.filter(c => c.job_type === advFilters.job_type);
+    }
+    if (advFilters.work_type) {
+        filtered = filtered.filter(c => c.work_type === advFilters.work_type);
+    }
+    if (advFilters.permit_type) {
+        filtered = filtered.filter(c => c.permit_type === advFilters.permit_type);
+    }
+    if (advFilters.permit_status) {
+        filtered = filtered.filter(c => c.permit_status === advFilters.permit_status);
+    }
+    if (advFilters.bldg_type) {
+        filtered = filtered.filter(c => c.bldg_type === advFilters.bldg_type);
+    }
+    if (advFilters.residential) {
+        filtered = filtered.filter(c => c.residential === advFilters.residential);
+    }
+    
     // Update filtered count display
     if (countDisplay) {
         const totalCount = allComposeContacts.length;
         const filteredCount = filtered.length;
-        if (filteredCount === totalCount) {
+        const hasFilters = searchTerm || roleFilter || boroughFilter || hasAdvancedFilters();
+        if (!hasFilters) {
             countDisplay.innerHTML = `<i class="fas fa-users"></i><span><strong>${totalCount.toLocaleString()}</strong> contacts available</span>`;
         } else {
             countDisplay.innerHTML = `<i class="fas fa-filter"></i><span><strong>${filteredCount.toLocaleString()}</strong> of ${totalCount.toLocaleString()} contacts match filters</span>`;
@@ -1449,6 +1523,47 @@ function initEventListeners() {
         applyContactPickerFilters();
     });
     
+    // Advanced Filters Toggle
+    document.getElementById('contact-picker-advanced-toggle')?.addEventListener('click', () => {
+        const panel = document.getElementById('contact-picker-advanced');
+        const btn = document.getElementById('contact-picker-advanced-toggle');
+        if (panel && btn) {
+            const isVisible = panel.style.display !== 'none';
+            panel.style.display = isVisible ? 'none' : 'block';
+            btn.classList.toggle('active', !isVisible);
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.className = isVisible ? 'fas fa-sliders-h' : 'fas fa-chevron-up';
+            }
+        }
+    });
+    
+    // Clear Advanced Filters
+    document.getElementById('contact-picker-clear-advanced')?.addEventListener('click', () => {
+        document.getElementById('contact-picker-neighborhood-filter').value = '';
+        document.getElementById('contact-picker-zip-filter').value = '';
+        document.getElementById('contact-picker-jobtype-filter').value = '';
+        document.getElementById('contact-picker-worktype-filter').value = '';
+        document.getElementById('contact-picker-permittype-filter').value = '';
+        document.getElementById('contact-picker-status-filter').value = '';
+        document.getElementById('contact-picker-bldgtype-filter').value = '';
+        document.getElementById('contact-picker-residential-filter').value = '';
+        applyContactPickerFilters();
+    });
+    
+    // Advanced Filter Event Listeners
+    const advancedFilterIds = [
+        'contact-picker-neighborhood-filter', 'contact-picker-zip-filter', 
+        'contact-picker-jobtype-filter', 'contact-picker-worktype-filter', 
+        'contact-picker-permittype-filter', 'contact-picker-status-filter',
+        'contact-picker-bldgtype-filter', 'contact-picker-residential-filter'
+    ];
+    advancedFilterIds.forEach(id => {
+        document.getElementById(id)?.addEventListener('change', () => {
+            applyContactPickerFilters();
+        });
+    });
+
     // Recurring toggle
     document.getElementById('is-recurring').addEventListener('change', (e) => {
         document.getElementById('recurring-options').style.display = 
