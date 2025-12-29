@@ -5,7 +5,7 @@ import logging
 import csv
 import io
 import re
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, make_response
 from flask_cors import CORS
 from twilio.twiml.messaging_response import MessagingResponse
 
@@ -19,6 +19,22 @@ from leads_service import (
     get_total_contact_count,
     normalize_phone,
     get_contacts_by_phones
+)
+from auth import (
+    init_auth_tables,
+    create_admin_if_needed,
+    authenticate_user,
+    validate_session,
+    logout_user,
+    get_current_user,
+    change_password,
+    list_users,
+    create_user,
+    update_user,
+    delete_user,
+    get_roles,
+    login_required,
+    role_required
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +79,13 @@ CORS(app)
 # Initialize database
 init_db()
 
+# Initialize auth tables and create admin if needed
+try:
+    init_auth_tables()
+    create_admin_if_needed()
+except Exception as e:
+    logger.warning(f"Auth initialization warning: {e}")
+
 
 # ============ Graceful Shutdown ============
 
@@ -103,6 +126,142 @@ def health_check():
             'status': 'unhealthy',
             'error': str(e)
         }), 500
+
+
+# ============ Authentication Routes ============
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """Authenticate user and return session token"""
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+    
+    if not email or not password:
+        return jsonify({'success': False, 'error': 'Email and password required'}), 400
+    
+    result = authenticate_user(email, password, dashboard='sms')
+    
+    if result['success']:
+        response = make_response(jsonify(result))
+        response.set_cookie(
+            'auth_token',
+            result['token'],
+            httponly=True,
+            secure=True,
+            samesite='Lax',
+            max_age=7*24*60*60  # 7 days
+        )
+        return response
+    
+    return jsonify(result), 401
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def logout():
+    """Logout user and invalidate session"""
+    token = request.cookies.get('auth_token')
+    if token:
+        logout_user(token)
+    
+    response = make_response(jsonify({'success': True}))
+    response.delete_cookie('auth_token')
+    return response
+
+
+@app.route('/api/auth/me', methods=['GET'])
+def get_me():
+    """Get current user info"""
+    user = get_current_user()
+    if not user:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+    return jsonify({'success': True, 'user': user})
+
+
+@app.route('/api/auth/change-password', methods=['POST'])
+def change_user_password():
+    """Change current user's password"""
+    user = get_current_user()
+    if not user:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+    
+    data = request.json
+    old_password = data.get('old_password') or data.get('current_password')
+    new_password = data.get('new_password')
+    
+    if not old_password or not new_password:
+        return jsonify({'success': False, 'error': 'Both passwords required'}), 400
+    
+    if len(new_password) < 8:
+        return jsonify({'success': False, 'error': 'Password must be at least 8 characters'}), 400
+    
+    result = change_password(user['id'], old_password, new_password)
+    return jsonify(result)
+
+
+# ============ User Management Routes (Admin only) ============
+
+@app.route('/api/users', methods=['GET'])
+@login_required
+@role_required('admin')
+def get_users():
+    """Get all users (admin only)"""
+    include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
+    users = list_users(include_inactive)
+    return jsonify({'success': True, 'users': users})
+
+
+@app.route('/api/users', methods=['POST'])
+@login_required
+@role_required('admin')
+def create_new_user():
+    """Create a new user (admin only)"""
+    from flask import g
+    data = request.json
+    
+    required = ['email', 'password', 'name']
+    if not all(data.get(f) for f in required):
+        return jsonify({'success': False, 'error': 'Email, password, and name required'}), 400
+    
+    result = create_user(
+        email=data['email'],
+        password=data['password'],
+        name=data['name'],
+        role=data.get('role', 'viewer'),
+        created_by=g.current_user['id']
+    )
+    
+    return jsonify(result)
+
+
+@app.route('/api/users/<int:user_id>', methods=['PUT'])
+@login_required
+@role_required('admin')
+def update_existing_user(user_id):
+    """Update a user (admin only)"""
+    data = request.json
+    result = update_user(user_id, **data)
+    return jsonify(result)
+
+
+@app.route('/api/users/<int:user_id>', methods=['DELETE'])
+@login_required
+@role_required('admin')
+def delete_existing_user(user_id):
+    """Delete a user (admin only)"""
+    from flask import g
+    if user_id == g.current_user['id']:
+        return jsonify({'success': False, 'error': 'Cannot delete yourself'}), 400
+    result = delete_user(user_id)
+    return jsonify(result)
+
+
+@app.route('/api/roles', methods=['GET'])
+@login_required
+def get_available_roles():
+    """Get available roles"""
+    roles = get_roles()
+    return jsonify({'success': True, 'roles': roles})
 
 
 # ============ Frontend Routes ============

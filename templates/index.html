@@ -8,6 +8,31 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
+    <!-- Login Screen -->
+    <div class="login-screen" id="login-screen">
+        <div class="login-container">
+            <div class="login-header">
+                <i class="fas fa-sms login-icon"></i>
+                <h1>SMS Dashboard</h1>
+                <p>Sign in to continue</p>
+            </div>
+            <form class="login-form" id="login-form">
+                <div class="login-error" id="login-error" style="display: none;"></div>
+                <div class="form-group">
+                    <label for="login-email">Email</label>
+                    <input type="email" id="login-email" placeholder="Enter your email" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" placeholder="Enter your password" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">
+                    <i class="fas fa-sign-in-alt"></i> Sign In
+                </button>
+            </form>
+        </div>
+    </div>
+
     <div class="app-container">
         <!-- Sidebar Navigation -->
         <aside class="sidebar">
@@ -33,7 +58,27 @@
                 <a href="#" class="nav-item" data-view="templates">
                     <i class="fas fa-file-alt"></i> Templates
                 </a>
+                <a href="#" class="nav-item admin-only" data-view="users" style="display: none;">
+                    <i class="fas fa-users-cog"></i> Users
+                </a>
             </nav>
+            <!-- User Info Footer -->
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <i class="fas fa-user-circle user-avatar"></i>
+                    <div class="user-details">
+                        <span class="user-name" id="user-display-name">User</span>
+                        <span class="user-role" id="user-display-role">Role</span>
+                    </div>
+                    <button class="btn-icon" id="user-menu-toggle" title="User menu">
+                        <i class="fas fa-ellipsis-v"></i>
+                    </button>
+                </div>
+                <div class="user-menu" id="user-menu">
+                    <a href="#" id="change-password-link"><i class="fas fa-key"></i> Change Password</a>
+                    <a href="#" id="logout-link"><i class="fas fa-sign-out-alt"></i> Sign Out</a>
+                </div>
+            </div>
         </aside>
 
         <!-- Main Content -->
@@ -267,6 +312,30 @@
                 </div>
                 <div class="templates-list" id="templates-list"></div>
             </section>
+
+            <!-- Users View (Admin Only) -->
+            <section id="users-view" class="view">
+                <div class="view-header">
+                    <h2>User Management</h2>
+                    <button class="btn btn-primary" id="add-user-btn">
+                        <i class="fas fa-user-plus"></i> Add User
+                    </button>
+                </div>
+                <div class="users-table-container">
+                    <table class="data-table users-table">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Last Login</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-list"></tbody>
+                    </table>
+                </div>
+            </section>
         </main>
     </div>
 
@@ -453,6 +522,82 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary modal-cancel">Cancel</button>
                 <button class="btn btn-primary" id="contact-picker-confirm">Confirm Selection</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div class="modal" id="password-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Change Password</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="password-form">
+                    <div class="form-group">
+                        <label for="current-password">Current Password</label>
+                        <input type="password" id="current-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-password">New Password</label>
+                        <input type="password" id="new-password" required minlength="8">
+                    </div>
+                    <div class="form-group">
+                        <label for="confirm-password">Confirm New Password</label>
+                        <input type="password" id="confirm-password" required minlength="8">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="save-password-btn">Change Password</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit User Modal -->
+    <div class="modal" id="user-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="user-modal-title">Add User</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="user-form">
+                    <input type="hidden" id="user-edit-id">
+                    <div class="form-group">
+                        <label for="user-name">Name *</label>
+                        <input type="text" id="user-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="user-email">Email *</label>
+                        <input type="email" id="user-email" required>
+                    </div>
+                    <div class="form-group" id="user-password-group">
+                        <label for="user-password">Password *</label>
+                        <input type="password" id="user-password" minlength="8">
+                    </div>
+                    <div class="form-group">
+                        <label for="user-role">Role</label>
+                        <select id="user-role">
+                            <option value="viewer">Viewer</option>
+                            <option value="agent">Agent</option>
+                            <option value="manager">Manager</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="user-active" checked>
+                            Active
+                        </label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="save-user-btn">Save User</button>
             </div>
         </div>
     </div>

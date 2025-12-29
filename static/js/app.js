@@ -1,3 +1,228 @@
+// ============ Auth State ============
+let currentUser = null;
+
+// ============ Auth Functions ============
+async function checkAuth() {
+    try {
+        const result = await API.get('/auth/me');
+        if (result.success && result.user) {
+            currentUser = result.user;
+            showApp();
+            updateUserDisplay();
+            return true;
+        }
+    } catch (e) {
+        console.log('Not authenticated');
+    }
+    showLogin();
+    return false;
+}
+
+function showLogin() {
+    document.getElementById('login-screen').classList.add('active');
+    document.querySelector('.app-container').style.display = 'none';
+}
+
+function showApp() {
+    document.getElementById('login-screen').classList.remove('active');
+    document.querySelector('.app-container').style.display = 'flex';
+    
+    // Show admin-only elements if admin
+    if (currentUser && currentUser.role === 'admin') {
+        document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
+    }
+}
+
+function updateUserDisplay() {
+    if (currentUser) {
+        document.getElementById('user-display-name').textContent = currentUser.name;
+        document.getElementById('user-display-role').textContent = currentUser.role;
+    }
+}
+
+async function handleLogin(e) {
+    e.preventDefault();
+    const email = document.getElementById('login-email').value;
+    const password = document.getElementById('login-password').value;
+    const errorEl = document.getElementById('login-error');
+    
+    try {
+        const result = await API.post('/auth/login', { email, password });
+        if (result.success) {
+            currentUser = result.user;
+            showApp();
+            updateUserDisplay();
+            loadDashboard();
+            errorEl.style.display = 'none';
+        } else {
+            errorEl.textContent = result.error || 'Login failed';
+            errorEl.style.display = 'block';
+        }
+    } catch (e) {
+        errorEl.textContent = 'Connection error';
+        errorEl.style.display = 'block';
+    }
+}
+
+async function handleLogout() {
+    await API.post('/auth/logout', {});
+    currentUser = null;
+    showLogin();
+    document.getElementById('login-email').value = '';
+    document.getElementById('login-password').value = '';
+}
+
+async function handleChangePassword(e) {
+    e.preventDefault();
+    const currentPassword = document.getElementById('current-password').value;
+    const newPassword = document.getElementById('new-password').value;
+    const confirmPassword = document.getElementById('confirm-password').value;
+    
+    if (newPassword !== confirmPassword) {
+        showToast('Passwords do not match', 'error');
+        return;
+    }
+    
+    if (newPassword.length < 8) {
+        showToast('Password must be at least 8 characters', 'error');
+        return;
+    }
+    
+    const result = await API.post('/auth/change-password', {
+        current_password: currentPassword,
+        new_password: newPassword
+    });
+    
+    if (result.success) {
+        showToast('Password changed successfully');
+        hideModal('password-modal');
+        document.getElementById('password-form').reset();
+    } else {
+        showToast(result.error || 'Failed to change password', 'error');
+    }
+}
+
+// ============ User Management Functions ============
+async function loadUsers() {
+    const result = await API.get('/users?include_inactive=true');
+    if (result.success) {
+        renderUsers(result.users);
+    }
+}
+
+function renderUsers(users) {
+    const tbody = document.getElementById('users-list');
+    tbody.innerHTML = users.map(user => `
+        <tr>
+            <td>
+                <div class="user-cell">
+                    <div class="user-avatar-small">${user.name.charAt(0).toUpperCase()}</div>
+                    <div class="user-cell-info">
+                        <span class="user-cell-name">${user.name}</span>
+                        <span class="user-cell-email">${user.email}</span>
+                    </div>
+                </div>
+            </td>
+            <td><span class="role-badge role-${user.role}">${user.role}</span></td>
+            <td><span class="user-status ${user.is_active ? 'active' : 'inactive'}">${user.is_active ? 'Active' : 'Inactive'}</span></td>
+            <td>${user.last_login ? formatDate(user.last_login) : 'Never'}</td>
+            <td class="actions-cell">
+                <button class="btn-icon" onclick="editUser(${user.id})" title="Edit">
+                    <i class="fas fa-edit"></i>
+                </button>
+                ${user.id !== currentUser.id ? `
+                    <button class="btn-icon danger" onclick="deleteUserConfirm(${user.id})" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                ` : ''}
+            </td>
+        </tr>
+    `).join('');
+}
+
+let usersCache = [];
+
+async function editUser(userId) {
+    if (!usersCache.length) {
+        const result = await API.get('/users?include_inactive=true');
+        if (result.success) usersCache = result.users;
+    }
+    
+    const user = usersCache.find(u => u.id === userId);
+    if (!user) return;
+    
+    document.getElementById('user-modal-title').textContent = 'Edit User';
+    document.getElementById('user-edit-id').value = user.id;
+    document.getElementById('user-name').value = user.name;
+    document.getElementById('user-email').value = user.email;
+    document.getElementById('user-email').disabled = true;
+    document.getElementById('user-password').value = '';
+    document.getElementById('user-password-group').style.display = 'none';
+    document.getElementById('user-role').value = user.role;
+    document.getElementById('user-active').checked = user.is_active;
+    
+    showModal('user-modal');
+}
+
+function showAddUserModal() {
+    document.getElementById('user-modal-title').textContent = 'Add User';
+    document.getElementById('user-form').reset();
+    document.getElementById('user-edit-id').value = '';
+    document.getElementById('user-email').disabled = false;
+    document.getElementById('user-password-group').style.display = 'block';
+    document.getElementById('user-active').checked = true;
+    showModal('user-modal');
+}
+
+async function saveUser() {
+    const userId = document.getElementById('user-edit-id').value;
+    const data = {
+        name: document.getElementById('user-name').value,
+        role: document.getElementById('user-role').value,
+        is_active: document.getElementById('user-active').checked
+    };
+    
+    if (!userId) {
+        // Creating new user
+        data.email = document.getElementById('user-email').value;
+        data.password = document.getElementById('user-password').value;
+        
+        if (!data.password || data.password.length < 8) {
+            showToast('Password must be at least 8 characters', 'error');
+            return;
+        }
+    }
+    
+    let result;
+    if (userId) {
+        result = await API.put(`/users/${userId}`, data);
+    } else {
+        result = await API.post('/users', data);
+    }
+    
+    if (result.success) {
+        showToast(userId ? 'User updated' : 'User created');
+        hideModal('user-modal');
+        usersCache = [];
+        loadUsers();
+    } else {
+        showToast(result.error || 'Failed to save user', 'error');
+    }
+}
+
+async function deleteUserConfirm(userId) {
+    if (!confirm('Are you sure you want to delete this user?')) return;
+    
+    const result = await API.delete(`/users/${userId}`);
+    if (result.success) {
+        showToast('User deleted');
+        usersCache = [];
+        loadUsers();
+    } else {
+        showToast(result.error || 'Failed to delete user', 'error');
+    }
+}
+
 // ============ API Service ============
 const API = {
     async get(endpoint) {
@@ -122,6 +347,9 @@ async function loadViewData(view) {
             break;
         case 'templates':
             await loadTemplates();
+            break;
+        case 'users':
+            await loadUsers();
             break;
     }
 }
@@ -1530,8 +1758,53 @@ function initEventListeners() {
 }
 
 // ============ Initialize ============
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     initNavigation();
     initEventListeners();
-    loadDashboard();
+    initAuthEventListeners();
+    
+    // Check auth first
+    const isLoggedIn = await checkAuth();
+    if (isLoggedIn) {
+        loadDashboard();
+    }
 });
+
+function initAuthEventListeners() {
+    // Login form
+    document.getElementById('login-form')?.addEventListener('submit', handleLogin);
+    
+    // Logout
+    document.getElementById('logout-link')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        handleLogout();
+    });
+    
+    // User menu toggle
+    document.getElementById('user-menu-toggle')?.addEventListener('click', () => {
+        document.getElementById('user-menu').classList.toggle('active');
+    });
+    
+    // Close user menu when clicking outside
+    document.addEventListener('click', (e) => {
+        const userMenu = document.getElementById('user-menu');
+        const toggle = document.getElementById('user-menu-toggle');
+        if (userMenu && toggle && !userMenu.contains(e.target) && !toggle.contains(e.target)) {
+            userMenu.classList.remove('active');
+        }
+    });
+    
+    // Change password
+    document.getElementById('change-password-link')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('user-menu').classList.remove('active');
+        document.getElementById('password-form').reset();
+        showModal('password-modal');
+    });
+    
+    document.getElementById('save-password-btn')?.addEventListener('click', handleChangePassword);
+    
+    // User management
+    document.getElementById('add-user-btn')?.addEventListener('click', showAddUserModal);
+    document.getElementById('save-user-btn')?.addEventListener('click', saveUser);
+}
