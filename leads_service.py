@@ -79,7 +79,10 @@ def get_leads_stats():
         }
 
 
-def search_contacts(search: str = None, mobile_only: bool = True, limit: int = 100, offset: int = 0, borough: str = None, role: str = None):
+def search_contacts(search: str = None, mobile_only: bool = True, limit: int = 100, offset: int = 0, 
+                    borough: str = None, role: str = None, neighborhood: str = None, zip_code: str = None,
+                    job_type: str = None, work_type: str = None, permit_type: str = None, 
+                    permit_status: str = None, bldg_type: str = None, residential: str = None):
     """
     Search contacts from the leads database.
     Combines permit contacts and owner contacts.
@@ -99,7 +102,15 @@ def search_contacts(search: str = None, mobile_only: bool = True, limit: int = 1
             p.permit_no,
             p.address,
             p.owner_business_name as company,
-            p.borough
+            p.borough,
+            p.nta_name as neighborhood,
+            p.zip_code,
+            p.job_type,
+            p.work_type,
+            p.permit_type,
+            p.permit_status,
+            p.bldg_type,
+            p.residential
         FROM contacts c
         LEFT JOIN permit_contacts pc ON c.id = pc.contact_id
         LEFT JOIN permits p ON pc.permit_id = p.id
@@ -128,6 +139,38 @@ def search_contacts(search: str = None, mobile_only: bool = True, limit: int = 1
     if role:
         query += " AND c.role = :role"
         params['role'] = role
+    
+    if neighborhood:
+        query += " AND p.nta_name = :neighborhood"
+        params['neighborhood'] = neighborhood
+    
+    if zip_code:
+        query += " AND p.zip_code = :zip_code"
+        params['zip_code'] = zip_code
+    
+    if job_type:
+        query += " AND p.job_type = :job_type"
+        params['job_type'] = job_type
+    
+    if work_type:
+        query += " AND p.work_type = :work_type"
+        params['work_type'] = work_type
+    
+    if permit_type:
+        query += " AND p.permit_type = :permit_type"
+        params['permit_type'] = permit_type
+    
+    if permit_status:
+        query += " AND p.permit_status = :permit_status"
+        params['permit_status'] = permit_status
+    
+    if bldg_type:
+        query += " AND p.bldg_type = :bldg_type"
+        params['bldg_type'] = bldg_type
+    
+    if residential:
+        query += " AND p.residential = :residential"
+        params['residential'] = residential
     
     query += " ORDER BY c.phone, c.updated_at DESC"
     query += f" LIMIT {limit} OFFSET {offset}"
@@ -252,7 +295,10 @@ def get_owner_contacts(search: str = None, limit: int = 100, offset: int = 0):
         return contacts
 
 
-def get_all_contacts(search: str = None, mobile_only: bool = True, source: str = 'all', limit: int = 100, offset: int = 0, borough: str = None, role: str = None):
+def get_all_contacts(search: str = None, mobile_only: bool = True, source: str = 'all', limit: int = 100, offset: int = 0, 
+                     borough: str = None, role: str = None, neighborhood: str = None, zip_code: str = None,
+                     job_type: str = None, work_type: str = None, permit_type: str = None,
+                     permit_status: str = None, bldg_type: str = None, residential: str = None):
     """
     Get contacts from both permit contacts and owner contacts.
     
@@ -264,11 +310,23 @@ def get_all_contacts(search: str = None, mobile_only: bool = True, source: str =
         offset: Pagination offset
         borough: Filter by borough (MANHATTAN, BROOKLYN, etc.)
         role: Filter by role (Owner, Permittee)
+        neighborhood: Filter by neighborhood (nta_name)
+        zip_code: Filter by zip code
+        job_type: Filter by job type (A1, A2, NB, etc.)
+        work_type: Filter by work type (OT, PL, EQ, etc.)
+        permit_type: Filter by permit type
+        permit_status: Filter by permit status (ISSUED, etc.)
+        bldg_type: Filter by building type (1, 2)
+        residential: Filter by residential (YES)
     """
     contacts = []
     
     if source in ['all', 'permit']:
-        permit_contacts = search_contacts(search, mobile_only, limit, offset, borough, role)
+        permit_contacts = search_contacts(
+            search, mobile_only, limit, offset, borough, role,
+            neighborhood, zip_code, job_type, work_type, permit_type,
+            permit_status, bldg_type, residential
+        )
         contacts.extend(permit_contacts)
     
     if source in ['all', 'owner']:

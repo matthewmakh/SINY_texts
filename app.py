@@ -385,6 +385,16 @@ def get_contacts():
     borough = request.args.get('borough', '')  # MANHATTAN, BROOKLYN, etc.
     role = request.args.get('role', '')  # Owner, Permittee
     
+    # Advanced filters
+    neighborhood = request.args.get('neighborhood', '')
+    zip_code = request.args.get('zip_code', '')
+    job_type = request.args.get('job_type', '')
+    work_type = request.args.get('work_type', '')
+    permit_type = request.args.get('permit_type', '')
+    permit_status = request.args.get('permit_status', '')
+    bldg_type = request.args.get('bldg_type', '')
+    residential = request.args.get('residential', '')
+    
     try:
         # Get leads database contacts
         contacts = get_all_contacts(
@@ -394,7 +404,15 @@ def get_contacts():
             limit=limit,
             offset=offset,
             borough=borough if borough else None,
-            role=role if role else None
+            role=role if role else None,
+            neighborhood=neighborhood if neighborhood else None,
+            zip_code=zip_code if zip_code else None,
+            job_type=job_type if job_type else None,
+            work_type=work_type if work_type else None,
+            permit_type=permit_type if permit_type else None,
+            permit_status=permit_status if permit_status else None,
+            bldg_type=bldg_type if bldg_type else None,
+            residential=residential if residential else None
         )
         
         # Format leads contacts for frontend
@@ -415,7 +433,15 @@ def get_contacts():
                 'role': c.get('role'),
                 'source': c.get('source', c.get('contact_source')),
                 'is_mobile': c.get('is_mobile', True),
-                'borough': c.get('borough')
+                'borough': c.get('borough'),
+                'neighborhood': c.get('neighborhood'),
+                'zip_code': c.get('zip_code'),
+                'job_type': c.get('job_type'),
+                'work_type': c.get('work_type'),
+                'permit_type': c.get('permit_type'),
+                'permit_status': c.get('permit_status'),
+                'bldg_type': c.get('bldg_type'),
+                'residential': c.get('residential')
             })
         
         # Also include manual contacts (filter by search if provided)
@@ -469,6 +495,45 @@ def get_contacts():
             'total': total,
             'limit': limit,
             'offset': offset
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/contacts/filter-options', methods=['GET'])
+def get_contact_filter_options():
+    """Get available filter options for contacts (neighborhoods, zip codes)"""
+    try:
+        from leads_service import get_leads_engine
+        engine = get_leads_engine()
+        
+        with engine.connect() as conn:
+            # Get top neighborhoods by count
+            neighborhoods_result = conn.execute(text("""
+                SELECT nta_name as value, COUNT(*) as cnt 
+                FROM permits 
+                WHERE nta_name IS NOT NULL AND nta_name != ''
+                GROUP BY nta_name 
+                ORDER BY cnt DESC 
+                LIMIT 50
+            """))
+            neighborhoods = [{'value': r.value, 'label': f"{r.value} ({r.cnt:,})"} for r in neighborhoods_result]
+            
+            # Get top zip codes by count
+            zips_result = conn.execute(text("""
+                SELECT zip_code as value, COUNT(*) as cnt 
+                FROM permits 
+                WHERE zip_code IS NOT NULL AND zip_code != ''
+                GROUP BY zip_code 
+                ORDER BY cnt DESC 
+                LIMIT 50
+            """))
+            zip_codes = [{'value': r.value, 'label': f"{r.value} ({r.cnt:,})"} for r in zips_result]
+        
+        return jsonify({
+            'success': True,
+            'neighborhoods': neighborhoods,
+            'zip_codes': zip_codes
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

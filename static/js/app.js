@@ -952,13 +952,16 @@ const MAX_RECIPIENTS = 50;
 let allComposeContacts = [];
 let selectedContactPhones = new Set();
 let contactsLoading = false;
+let contactPickerPage = 1;
+const CONTACTS_PER_PAGE = 500;
 
 async function loadComposeView() {
     // Show skeleton in picker if it's open
     contactsLoading = true;
+    contactPickerPage = 1;
     
-    // Load contacts for selector (mobile only for SMS)
-    const response = await API.get('/contacts?mobile_only=true&limit=500');
+    // Load contacts for selector (mobile only for SMS) - no limit to get all
+    const response = await API.get('/contacts?mobile_only=true&limit=100000');
     allComposeContacts = response.success ? response.contacts : [];
     contactsLoading = false;
     
@@ -979,9 +982,35 @@ async function loadComposeView() {
     // Populate role filter
     populateRoleFilter();
     
+    // Load filter options (neighborhoods, zip codes)
+    loadFilterOptions();
+    
     // Render chips
     renderSelectedChips();
     updateSelectedCount();
+}
+
+async function loadFilterOptions() {
+    try {
+        const response = await API.get('/contacts/filter-options');
+        if (response.success) {
+            // Populate neighborhoods
+            const neighborhoodSelect = document.getElementById('contact-picker-neighborhood-filter');
+            if (neighborhoodSelect && response.neighborhoods) {
+                neighborhoodSelect.innerHTML = '<option value="">All Neighborhoods</option>' +
+                    response.neighborhoods.map(n => `<option value="${n.value}">${n.label}</option>`).join('');
+            }
+            
+            // Populate zip codes
+            const zipSelect = document.getElementById('contact-picker-zip-filter');
+            if (zipSelect && response.zip_codes) {
+                zipSelect.innerHTML = '<option value="">All Zip Codes</option>' +
+                    response.zip_codes.map(z => `<option value="${z.value}">${z.label}</option>`).join('');
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load filter options:', e);
+    }
 }
 
 function populateRoleFilter() {
@@ -1003,6 +1032,24 @@ function openContactPicker() {
     showModal('contact-picker-modal');
 }
 
+function getAdvancedFilters() {
+    return {
+        neighborhood: document.getElementById('contact-picker-neighborhood-filter')?.value || '',
+        zip_code: document.getElementById('contact-picker-zip-filter')?.value || '',
+        job_type: document.getElementById('contact-picker-jobtype-filter')?.value || '',
+        work_type: document.getElementById('contact-picker-worktype-filter')?.value || '',
+        permit_type: document.getElementById('contact-picker-permittype-filter')?.value || '',
+        permit_status: document.getElementById('contact-picker-status-filter')?.value || '',
+        bldg_type: document.getElementById('contact-picker-bldgtype-filter')?.value || '',
+        residential: document.getElementById('contact-picker-residential-filter')?.value || ''
+    };
+}
+
+function hasAdvancedFilters() {
+    const filters = getAdvancedFilters();
+    return Object.values(filters).some(v => v !== '');
+}
+
 function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter = '') {
     const container = document.getElementById('contact-picker-list');
     const countDisplay = document.getElementById('contact-picker-filtered-count');
@@ -1014,6 +1061,9 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
         roleFilter = document.getElementById('contact-picker-role-filter')?.value || '';
         boroughFilter = document.getElementById('contact-picker-borough-filter')?.value || '';
     }
+    
+    // Get advanced filters
+    const advFilters = getAdvancedFilters();
     
     // Filter contacts
     let filtered = allComposeContacts;
@@ -1035,11 +1085,38 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
         filtered = filtered.filter(c => c.borough === boroughFilter);
     }
     
+    // Apply advanced filters
+    if (advFilters.neighborhood) {
+        filtered = filtered.filter(c => c.neighborhood === advFilters.neighborhood);
+    }
+    if (advFilters.zip_code) {
+        filtered = filtered.filter(c => c.zip_code === advFilters.zip_code);
+    }
+    if (advFilters.job_type) {
+        filtered = filtered.filter(c => c.job_type === advFilters.job_type);
+    }
+    if (advFilters.work_type) {
+        filtered = filtered.filter(c => c.work_type === advFilters.work_type);
+    }
+    if (advFilters.permit_type) {
+        filtered = filtered.filter(c => c.permit_type === advFilters.permit_type);
+    }
+    if (advFilters.permit_status) {
+        filtered = filtered.filter(c => c.permit_status === advFilters.permit_status);
+    }
+    if (advFilters.bldg_type) {
+        filtered = filtered.filter(c => c.bldg_type === advFilters.bldg_type);
+    }
+    if (advFilters.residential) {
+        filtered = filtered.filter(c => c.residential === advFilters.residential);
+    }
+    
     // Update filtered count display
     if (countDisplay) {
         const totalCount = allComposeContacts.length;
         const filteredCount = filtered.length;
-        if (filteredCount === totalCount) {
+        const hasFilters = searchTerm || roleFilter || boroughFilter || hasAdvancedFilters();
+        if (!hasFilters) {
             countDisplay.innerHTML = `<i class="fas fa-users"></i><span><strong>${totalCount.toLocaleString()}</strong> contacts available</span>`;
         } else {
             countDisplay.innerHTML = `<i class="fas fa-filter"></i><span><strong>${filteredCount.toLocaleString()}</strong> of ${totalCount.toLocaleString()} contacts match filters</span>`;
@@ -1053,26 +1130,54 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
                 <p>No contacts found</p>
             </div>
         `;
+        renderContactPickerPagination(0, 0);
         return;
     }
     
-    container.innerHTML = filtered.map(c => {
+    // Pagination
+    const totalPages = Math.ceil(filtered.length / CONTACTS_PER_PAGE);
+    if (contactPickerPage > totalPages) contactPickerPage = 1;
+    const startIdx = (contactPickerPage - 1) * CONTACTS_PER_PAGE;
+    const endIdx = startIdx + CONTACTS_PER_PAGE;
+    const pageContacts = filtered.slice(startIdx, endIdx);
+    
+    container.innerHTML = pageContacts.map(c => {
         const isSelected = selectedContactPhones.has(c.phone_number);
+        
+        // Smart name display: use name, fall back to company if name is NA/N/A/empty
+        let displayName = c.name;
+        const isNameEmpty = !displayName || displayName === 'NA' || displayName === 'N/A' || displayName === 'null' || displayName.trim() === '';
+        if (isNameEmpty && c.company) {
+            displayName = c.company;
+        } else if (isNameEmpty) {
+            displayName = 'Unknown';
+        }
+        
+        // Show company only if different from display name
+        const showCompany = c.company && c.company !== displayName && c.company !== 'N/A' && c.company !== 'None';
+        
         return `
             <div class="contact-picker-item ${isSelected ? 'selected' : ''}" data-phone="${c.phone_number}">
                 <input type="checkbox" ${isSelected ? 'checked' : ''}>
                 <div class="contact-picker-item-info">
-                    <div class="contact-picker-item-name">${c.name || 'Unknown'}</div>
+                    <div class="contact-picker-item-name">${displayName}</div>
                     <div class="contact-picker-item-details">
                         <span class="contact-picker-item-phone">${c.phone_number}</span>
-                        ${c.company ? `<span>${c.company}</span>` : ''}
+                        ${showCompany ? `<span class="contact-picker-item-company">${c.company}</span>` : ''}
+                        ${c.address ? `<span class="contact-picker-item-address">${c.address}</span>` : ''}
+                    </div>
+                    <div class="contact-picker-item-tags">
                         ${c.role ? `<span class="contact-picker-item-role">${c.role}</span>` : ''}
                         ${c.borough ? `<span class="contact-picker-item-borough">${c.borough}</span>` : ''}
+                        ${c.source === 'manual' ? `<span class="contact-picker-item-manual">Manual</span>` : ''}
                     </div>
                 </div>
             </div>
         `;
     }).join('');
+    
+    // Render pagination
+    renderContactPickerPagination(filtered.length, totalPages);
     
     // Add click handlers
     container.querySelectorAll('.contact-picker-item').forEach(item => {
@@ -1101,6 +1206,58 @@ function renderContactPickerList(searchTerm = '', roleFilter = '', boroughFilter
     updatePickerCount();
 }
 
+function renderContactPickerPagination(totalContacts, totalPages) {
+    let paginationContainer = document.getElementById('contact-picker-pagination');
+    if (!paginationContainer) {
+        // Create pagination container if doesn't exist
+        const listContainer = document.getElementById('contact-picker-list');
+        if (listContainer) {
+            paginationContainer = document.createElement('div');
+            paginationContainer.id = 'contact-picker-pagination';
+            paginationContainer.className = 'contact-picker-pagination';
+            listContainer.parentNode.insertBefore(paginationContainer, listContainer.nextSibling);
+        }
+    }
+    
+    if (!paginationContainer || totalPages <= 1) {
+        if (paginationContainer) paginationContainer.innerHTML = '';
+        return;
+    }
+    
+    const startItem = (contactPickerPage - 1) * CONTACTS_PER_PAGE + 1;
+    const endItem = Math.min(contactPickerPage * CONTACTS_PER_PAGE, totalContacts);
+    
+    paginationContainer.innerHTML = `
+        <div class="pagination-info">
+            Showing ${startItem.toLocaleString()}-${endItem.toLocaleString()} of ${totalContacts.toLocaleString()}
+        </div>
+        <div class="pagination-controls">
+            <button class="btn btn-sm" ${contactPickerPage === 1 ? 'disabled' : ''} data-page="prev">
+                <i class="fas fa-chevron-left"></i> Prev
+            </button>
+            <span class="pagination-current">Page ${contactPickerPage} of ${totalPages}</span>
+            <button class="btn btn-sm" ${contactPickerPage === totalPages ? 'disabled' : ''} data-page="next">
+                Next <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    `;
+    
+    // Add pagination click handlers
+    paginationContainer.querySelectorAll('button[data-page]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (btn.disabled) return;
+            if (btn.dataset.page === 'prev') {
+                contactPickerPage--;
+            } else if (btn.dataset.page === 'next') {
+                contactPickerPage++;
+            }
+            applyContactPickerFilters(false); // Don't reset page
+            // Scroll to top of list
+            document.getElementById('contact-picker-list')?.scrollTo(0, 0);
+        });
+    });
+}
+
 function updatePickerCount() {
     const countEl = document.getElementById('contact-picker-count');
     if (countEl) {
@@ -1110,7 +1267,8 @@ function updatePickerCount() {
     }
 }
 
-function applyContactPickerFilters() {
+function applyContactPickerFilters(resetPage = true) {
+    if (resetPage) contactPickerPage = 1; // Reset to page 1 when filters change
     const searchTerm = document.getElementById('contact-picker-search')?.value || '';
     const roleFilter = document.getElementById('contact-picker-role-filter')?.value || '';
     const boroughFilter = document.getElementById('contact-picker-borough-filter')?.value || '';
@@ -1660,6 +1818,47 @@ function initEventListeners() {
         applyContactPickerFilters();
     });
     
+    // Advanced Filters Toggle
+    document.getElementById('contact-picker-advanced-toggle')?.addEventListener('click', () => {
+        const panel = document.getElementById('contact-picker-advanced');
+        const btn = document.getElementById('contact-picker-advanced-toggle');
+        if (panel && btn) {
+            const isVisible = panel.style.display !== 'none';
+            panel.style.display = isVisible ? 'none' : 'block';
+            btn.classList.toggle('active', !isVisible);
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.className = isVisible ? 'fas fa-sliders-h' : 'fas fa-chevron-up';
+            }
+        }
+    });
+    
+    // Clear Advanced Filters
+    document.getElementById('contact-picker-clear-advanced')?.addEventListener('click', () => {
+        document.getElementById('contact-picker-neighborhood-filter').value = '';
+        document.getElementById('contact-picker-zip-filter').value = '';
+        document.getElementById('contact-picker-jobtype-filter').value = '';
+        document.getElementById('contact-picker-worktype-filter').value = '';
+        document.getElementById('contact-picker-permittype-filter').value = '';
+        document.getElementById('contact-picker-status-filter').value = '';
+        document.getElementById('contact-picker-bldgtype-filter').value = '';
+        document.getElementById('contact-picker-residential-filter').value = '';
+        applyContactPickerFilters();
+    });
+    
+    // Advanced Filter Event Listeners
+    const advancedFilterIds = [
+        'contact-picker-neighborhood-filter', 'contact-picker-zip-filter', 
+        'contact-picker-jobtype-filter', 'contact-picker-worktype-filter', 
+        'contact-picker-permittype-filter', 'contact-picker-status-filter',
+        'contact-picker-bldgtype-filter', 'contact-picker-residential-filter'
+    ];
+    advancedFilterIds.forEach(id => {
+        document.getElementById(id)?.addEventListener('change', () => {
+            applyContactPickerFilters();
+        });
+    });
+
     // Recurring toggle
     document.getElementById('is-recurring').addEventListener('change', (e) => {
         document.getElementById('recurring-options').style.display = 

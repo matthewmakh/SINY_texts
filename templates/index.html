@@ -503,6 +503,94 @@
                     <div class="contact-picker-filter-row">
                         <button type="button" class="btn btn-sm" id="contact-picker-select-all">Select All Visible</button>
                         <button type="button" class="btn btn-sm btn-secondary" id="contact-picker-clear-all">Clear All</button>
+                        <button type="button" class="btn btn-sm btn-outline" id="contact-picker-advanced-toggle">
+                            <i class="fas fa-sliders-h"></i> Advanced Filters
+                        </button>
+                    </div>
+                    
+                    <!-- Advanced Filters (collapsible) -->
+                    <div class="contact-picker-advanced" id="contact-picker-advanced" style="display: none;">
+                        <div class="advanced-filters-grid">
+                            <div class="advanced-filter-group">
+                                <label>Neighborhood</label>
+                                <select id="contact-picker-neighborhood-filter">
+                                    <option value="">All Neighborhoods</option>
+                                </select>
+                            </div>
+                            <div class="advanced-filter-group">
+                                <label>Zip Code</label>
+                                <select id="contact-picker-zip-filter">
+                                    <option value="">All Zip Codes</option>
+                                </select>
+                            </div>
+                            <div class="advanced-filter-group">
+                                <label>Job Type</label>
+                                <select id="contact-picker-jobtype-filter">
+                                    <option value="">All Job Types</option>
+                                    <option value="A1">A1 - Alteration Type 1</option>
+                                    <option value="A2">A2 - Alteration Type 2</option>
+                                    <option value="A3">A3 - Alteration Type 3</option>
+                                    <option value="NB">NB - New Building</option>
+                                    <option value="DM">DM - Demolition</option>
+                                    <option value="SG">SG - Sign</option>
+                                </select>
+                            </div>
+                            <div class="advanced-filter-group">
+                                <label>Work Type</label>
+                                <select id="contact-picker-worktype-filter">
+                                    <option value="">All Work Types</option>
+                                    <option value="OT">OT - Other</option>
+                                    <option value="PL">PL - Plumbing</option>
+                                    <option value="EQ">EQ - Equipment</option>
+                                    <option value="MH">MH - Mechanical</option>
+                                    <option value="SP">SP - Sprinkler</option>
+                                    <option value="FP">FP - Fire Protection</option>
+                                    <option value="BL">BL - Boiler</option>
+                                    <option value="SD">SD - Standpipe</option>
+                                </select>
+                            </div>
+                            <div class="advanced-filter-group">
+                                <label>Permit Type</label>
+                                <select id="contact-picker-permittype-filter">
+                                    <option value="">All Permit Types</option>
+                                    <option value="EW">EW - Equipment Work</option>
+                                    <option value="PL">PL - Plumbing</option>
+                                    <option value="EQ">EQ - Construction Equipment</option>
+                                    <option value="AL">AL - Alteration</option>
+                                    <option value="NB">NB - New Building</option>
+                                    <option value="DM">DM - Demolition</option>
+                                    <option value="SG">SG - Sign</option>
+                                    <option value="FO">FO - Foundation</option>
+                                </select>
+                            </div>
+                            <div class="advanced-filter-group">
+                                <label>Permit Status</label>
+                                <select id="contact-picker-status-filter">
+                                    <option value="">All Statuses</option>
+                                    <option value="ISSUED">Issued</option>
+                                    <option value="RE-ISSUED">Re-Issued</option>
+                                    <option value="IN PROCESS">In Process</option>
+                                </select>
+                            </div>
+                            <div class="advanced-filter-group">
+                                <label>Building Type</label>
+                                <select id="contact-picker-bldgtype-filter">
+                                    <option value="">All Building Types</option>
+                                    <option value="1">1 - One/Two Family</option>
+                                    <option value="2">2 - Multiple Dwelling</option>
+                                </select>
+                            </div>
+                            <div class="advanced-filter-group">
+                                <label>Residential</label>
+                                <select id="contact-picker-residential-filter">
+                                    <option value="">All</option>
+                                    <option value="YES">Residential Only</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="advanced-filters-actions">
+                            <button type="button" class="btn btn-sm btn-secondary" id="contact-picker-clear-advanced">Clear Advanced Filters</button>
+                        </div>
                     </div>
                 </div>
                 <!-- Filtered Count Display -->

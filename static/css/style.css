@@ -856,6 +856,137 @@ body {
     font-weight: 600;
 }
 
+/* Advanced Filters Toggle Button */
+.btn-outline {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+.btn-outline:hover {
+    background: var(--bg-color);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.btn-outline i {
+    margin-right: 4px;
+}
+
+/* Advanced Filters Panel */
+.contact-picker-advanced {
+    background: #f8fafc;
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    padding: 12px 16px;
+    animation: slideDown 0.2s ease-out;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.advanced-filters-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+
+.advanced-filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.advanced-filter-group label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.advanced-filter-group select {
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    font-size: 0.8rem;
+    background: white;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.advanced-filter-group select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px var(--primary-glow);
+}
+
+.advanced-filters-actions {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* Responsive for advanced filters */
+@media (max-width: 480px) {
+    .advanced-filters-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Contact Picker Pagination */
+.contact-picker-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color);
+    background: #f8fafc;
+    gap: 12px;
+}
+
+.pagination-info {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pagination-current {
+    font-size: 0.85rem;
+    color: var(--text-color);
+    min-width: 100px;
+    text-align: center;
+}
+
+.pagination-controls .btn {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+}
+
+.pagination-controls .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .contact-picker-list {
     max-height: 350px;
     overflow-y: auto;
