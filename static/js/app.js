@@ -1759,11 +1759,15 @@ function initEventListeners() {
 
 // ============ Initialize ============
 document.addEventListener('DOMContentLoaded', async () => {
+    // Hide app and show login screen immediately
+    document.querySelector('.app-container').style.display = 'none';
+    document.getElementById('login-screen').classList.add('active');
+    
     initNavigation();
     initEventListeners();
     initAuthEventListeners();
     
-    // Check auth first
+    // Check auth - if logged in, will show app
     const isLoggedIn = await checkAuth();
     if (isLoggedIn) {
         loadDashboard();

@@ -1828,3 +1828,290 @@ body {
         padding: 24px;
     }
 }
+
+/* ============ Login Screen ============ */
+.login-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, var(--sidebar-bg) 0%, #0f172a 100%);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.login-screen.active {
+    display: flex;
+}
+
+.login-container {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 400px;
+    margin: 20px;
+    overflow: hidden;
+}
+
+.login-header {
+    background: var(--sidebar-bg);
+    color: white;
+    padding: 32px;
+    text-align: center;
+}
+
+.login-icon {
+    font-size: 3rem;
+    margin-bottom: 16px;
+    color: var(--primary-color);
+}
+
+.login-header h1 {
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+}
+
+.login-header p {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.9rem;
+}
+
+.login-form {
+    padding: 32px;
+}
+
+.login-form .form-group {
+    margin-bottom: 20px;
+}
+
+.login-error {
+    background: #fef2f2;
+    border: 1px solid var(--danger-color);
+    color: var(--danger-color);
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+}
+
+.btn-block {
+    width: 100%;
+}
+
+/* ============ Sidebar Footer / User Info ============ */
+.sidebar-footer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.user-avatar {
+    font-size: 2rem;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.user-details {
+    flex: 1;
+    overflow: hidden;
+}
+
+.user-name {
+    display: block;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: white;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-role {
+    display: block;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: capitalize;
+}
+
+.btn-icon {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    padding: 8px;
+    border-radius: var(--radius);
+    transition: var(--transition-normal);
+}
+
+.btn-icon:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+.user-menu {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    position: absolute;
+    bottom: 70px;
+    left: 16px;
+    right: 16px;
+    overflow: hidden;
+    display: none;
+}
+
+.user-menu.active {
+    display: block;
+}
+
+.user-menu a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: var(--transition-fast);
+    font-size: 0.9rem;
+}
+
+.user-menu a:hover {
+    background: var(--bg-color);
+}
+
+.user-menu a i {
+    width: 16px;
+    color: var(--text-secondary);
+}
+
+/* ============ Role Badges ============ */
+.role-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-transform: capitalize;
+}
+
+.role-badge.role-admin {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.role-badge.role-manager {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.role-badge.role-agent {
+    background: #f3e8ff;
+    color: #6b21a8;
+}
+
+.role-badge.role-viewer {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+/* ============ Users Table ============ */
+.users-table-container {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+}
+
+.users-table {
+    width: 100%;
+}
+
+.user-cell {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.user-avatar-small {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.user-cell-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.user-cell-name {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.user-cell-email {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.user-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.user-status.active {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.user-status.inactive {
+    background: #fef2f2;
+    color: #991b1b;
+}
+
+.user-status::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.actions-cell {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-icon.danger {
+    color: var(--danger-color);
+}
+
+.btn-icon.danger:hover {
+    background: #fef2f2;
+}
