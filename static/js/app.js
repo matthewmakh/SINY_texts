@@ -342,6 +342,9 @@ async function loadViewData(view) {
         case 'compose':
             await loadComposeView();
             break;
+        case 'campaigns':
+            await loadCampaigns();
+            break;
         case 'scheduled':
             await loadScheduled();
             break;
@@ -2011,3 +2014,819 @@ function initAuthEventListeners() {
     document.getElementById('add-user-btn')?.addEventListener('click', showAddUserModal);
     document.getElementById('save-user-btn')?.addEventListener('click', saveUser);
 }
+
+// ============ Campaigns Module ============
+
+let campaignState = {
+    currentStep: 1,
+    campaignData: {
+        name: '',
+        description: '',
+        enrollment_type: 'snapshot',
+        default_send_time: '11:00',
+        filter_criteria: {},
+        messages: []
+    },
+    previewContacts: [],
+    previewCount: 0,
+    overlappingPhones: [],
+    excludeOverlap: false,
+    editingCampaignId: null
+};
+
+async function loadCampaigns() {
+    const container = document.getElementById('campaigns-list');
+    container.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Loading campaigns...</div>';
+    
+    try {
+        const result = await API.get('/campaigns');
+        if (result.success) {
+            renderCampaignsList(result.campaigns);
+        } else {
+            container.innerHTML = '<p class="error">Failed to load campaigns</p>';
+        }
+    } catch (e) {
+        container.innerHTML = '<p class="error">Error loading campaigns</p>';
+        console.error(e);
+    }
+}
+
+function renderCampaignsList(campaigns) {
+    const container = document.getElementById('campaigns-list');
+    
+    if (!campaigns || campaigns.length === 0) {
+        container.innerHTML = `
+            <div class="no-campaigns-hint" style="text-align: center; padding: 60px; color: var(--text-secondary);">
+                <i class="fas fa-bullhorn" style="font-size: 4rem; margin-bottom: 16px; opacity: 0.3;"></i>
+                <h3>No Campaigns Yet</h3>
+                <p>Create your first campaign to start reaching your contacts with automated message sequences.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = campaigns.map(campaign => {
+        const stats = campaign.stats || {};
+        const statusIcon = {
+            'draft': '📝',
+            'active': '🟢',
+            'paused': '🟡',
+            'completed': '✅'
+        }[campaign.status] || '📝';
+        
+        return `
+            <div class="campaign-card" data-campaign-id="${campaign.id}">
+                <div class="campaign-card-header">
+                    <h3 class="campaign-card-title">
+                        <span>${statusIcon}</span>
+                        ${escapeHtml(campaign.name)}
+                    </h3>
+                    <span class="campaign-status-badge ${campaign.status}">${campaign.status}</span>
+                </div>
+                <div class="campaign-card-stats">
+                    <div class="campaign-stat">
+                        <span class="campaign-stat-value">${stats.total_enrolled || 0}</span>
+                        <span class="campaign-stat-label">Contacts</span>
+                    </div>
+                    <div class="campaign-stat">
+                        <span class="campaign-stat-value">${campaign.message_count || 0}</span>
+                        <span class="campaign-stat-label">Messages</span>
+                    </div>
+                    <div class="campaign-stat">
+                        <span class="campaign-stat-value">${stats.engaged || 0}</span>
+                        <span class="campaign-stat-label">Responses</span>
+                    </div>
+                    <div class="campaign-stat">
+                        <span class="campaign-stat-value">${stats.engaged_rate || 0}%</span>
+                        <span class="campaign-stat-label">Response Rate</span>
+                    </div>
+                </div>
+                <div class="campaign-card-footer">
+                    <span class="campaign-card-info">
+                        ${campaign.enrollment_type === 'snapshot' ? '📷 Snapshot' : '🔄 Dynamic'} • 
+                        ${campaign.message_count || 0} messages
+                    </span>
+                    <div class="campaign-card-actions">
+                        <button class="btn btn-sm btn-secondary" onclick="viewCampaign(${campaign.id})">
+                            <i class="fas fa-eye"></i> View
+                        </button>
+                        ${campaign.status === 'draft' ? `
+                            <button class="btn btn-sm btn-primary" onclick="editCampaign(${campaign.id})">
+                                <i class="fas fa-edit"></i> Edit
+                            </button>
+                        ` : ''}
+                        ${campaign.status === 'active' ? `
+                            <button class="btn btn-sm btn-warning" onclick="pauseCampaign(${campaign.id})">
+                                <i class="fas fa-pause"></i> Pause
+                            </button>
+                        ` : ''}
+                        ${campaign.status === 'paused' ? `
+                            <button class="btn btn-sm btn-success" onclick="resumeCampaign(${campaign.id})">
+                                <i class="fas fa-play"></i> Resume
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function viewCampaign(campaignId) {
+    document.getElementById('campaigns-list-container').style.display = 'none';
+    document.getElementById('campaign-detail-container').style.display = 'block';
+    
+    const container = document.getElementById('campaign-detail-content');
+    container.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Loading campaign details...</div>';
+    
+    try {
+        const [campaignResult, statsResult] = await Promise.all([
+            API.get(`/campaigns/${campaignId}`),
+            API.get(`/campaigns/${campaignId}/stats`)
+        ]);
+        
+        if (campaignResult.success) {
+            renderCampaignDetail(campaignResult.campaign, statsResult.stats);
+        } else {
+            container.innerHTML = '<p class="error">Failed to load campaign</p>';
+        }
+    } catch (e) {
+        container.innerHTML = '<p class="error">Error loading campaign</p>';
+        console.error(e);
+    }
+}
+
+function renderCampaignDetail(campaign, stats) {
+    const container = document.getElementById('campaign-detail-content');
+    const statusIcon = {
+        'draft': '📝',
+        'active': '🟢',
+        'paused': '🟡',
+        'completed': '✅'
+    }[campaign.status] || '📝';
+    
+    container.innerHTML = `
+        <div class="campaign-detail-header">
+            <div>
+                <h2 class="campaign-detail-title">${statusIcon} ${escapeHtml(campaign.name)}</h2>
+                <div class="campaign-detail-meta">
+                    <span><i class="fas fa-calendar"></i> Created: ${formatDate(campaign.created_at)}</span>
+                    ${campaign.started_at ? `<span><i class="fas fa-play"></i> Started: ${formatDate(campaign.started_at)}</span>` : ''}
+                    <span><i class="fas fa-clock"></i> Send Time: ${campaign.default_send_time} EST</span>
+                    <span>${campaign.enrollment_type === 'snapshot' ? '📷 Snapshot' : '🔄 Dynamic'}</span>
+                </div>
+            </div>
+            <div class="campaign-detail-actions">
+                <span class="campaign-status-badge ${campaign.status}">${campaign.status}</span>
+                ${campaign.status === 'draft' ? `
+                    <button class="btn btn-success" onclick="startCampaign(${campaign.id})">
+                        <i class="fas fa-rocket"></i> Start Campaign
+                    </button>
+                ` : ''}
+                ${campaign.status === 'active' ? `
+                    <button class="btn btn-warning" onclick="pauseCampaign(${campaign.id})">
+                        <i class="fas fa-pause"></i> Pause
+                    </button>
+                ` : ''}
+                ${campaign.status === 'paused' ? `
+                    <button class="btn btn-success" onclick="resumeCampaign(${campaign.id})">
+                        <i class="fas fa-play"></i> Resume
+                    </button>
+                ` : ''}
+            </div>
+        </div>
+        
+        <div class="campaign-detail-stats">
+            <div class="campaign-detail-stat-card">
+                <div class="campaign-detail-stat-value">${stats?.total_enrolled || 0}</div>
+                <div class="campaign-detail-stat-label">Total Enrolled</div>
+            </div>
+            <div class="campaign-detail-stat-card">
+                <div class="campaign-detail-stat-value">${stats?.engaged || 0}</div>
+                <div class="campaign-detail-stat-label">Responded</div>
+            </div>
+            <div class="campaign-detail-stat-card">
+                <div class="campaign-detail-stat-value">${stats?.engaged_rate || 0}%</div>
+                <div class="campaign-detail-stat-label">Response Rate</div>
+            </div>
+            <div class="campaign-detail-stat-card">
+                <div class="campaign-detail-stat-value">${stats?.opted_out || 0}</div>
+                <div class="campaign-detail-stat-label">Opted Out</div>
+            </div>
+        </div>
+        
+        <div class="message-sequence">
+            <div class="message-sequence-header">
+                <i class="fas fa-stream"></i> Message Sequence
+            </div>
+            ${renderMessageSequence(campaign.messages, stats?.messages)}
+        </div>
+        
+        <div class="engagement-list">
+            <div class="engagement-section">
+                <div class="engagement-section-header engaged">
+                    <i class="fas fa-check-circle"></i> Engaged Contacts (${stats?.engaged_contacts?.length || 0})
+                </div>
+                <div class="engagement-list-items">
+                    ${(stats?.engaged_contacts || []).map(e => `
+                        <div class="engagement-item">
+                            <div class="engagement-item-name">${escapeHtml(e.contact_name || e.phone_number)}</div>
+                            <div class="engagement-item-detail">
+                                Responded to Message ${e.first_response_message_id || '?'} • 
+                                ${formatDate(e.first_response_at)}
+                            </div>
+                        </div>
+                    `).join('') || '<div class="engagement-item">No responses yet</div>'}
+                </div>
+            </div>
+            <div class="engagement-section">
+                <div class="engagement-section-header opted-out">
+                    <i class="fas fa-ban"></i> Opted Out (${stats?.opted_out_contacts?.length || 0})
+                </div>
+                <div class="engagement-list-items">
+                    ${(stats?.opted_out_contacts || []).map(e => `
+                        <div class="engagement-item">
+                            <div class="engagement-item-name">${escapeHtml(e.contact_name || e.phone_number)}</div>
+                            <div class="engagement-item-detail">
+                                "${escapeHtml(e.opted_out_keyword || 'STOP')}" • 
+                                ${formatDate(e.opted_out_at)}
+                            </div>
+                        </div>
+                    `).join('') || '<div class="engagement-item">No opt-outs</div>'}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderMessageSequence(messages, messageStats) {
+    if (!messages || messages.length === 0) {
+        return '<div class="message-sequence-item"><p>No messages in this campaign</p></div>';
+    }
+    
+    const statsMap = {};
+    if (messageStats) {
+        messageStats.forEach(s => statsMap[s.message_id] = s);
+    }
+    
+    return messages.map((msg, index) => {
+        const stats = statsMap[msg.id] || {};
+        const statusClass = stats.sent > 0 ? 'sent' : 'pending';
+        
+        return `
+            <div class="message-sequence-item">
+                <div class="message-sequence-icon ${statusClass}">
+                    ${index + 1}
+                </div>
+                <div class="message-sequence-content">
+                    <div class="message-sequence-title">
+                        Message ${index + 1}
+                        ${index === 0 ? '(Start)' : `(Day +${msg.days_after_previous})`}
+                        ${msg.enable_followup ? '<span class="followup-indicator"><i class="fas fa-redo"></i> Follow-up</span>' : ''}
+                        ${msg.has_ab_test ? '<span class="followup-indicator" style="background: #dbeafe; color: #1e40af;"><i class="fas fa-vial"></i> A/B</span>' : ''}
+                    </div>
+                    <div class="message-sequence-preview">"${escapeHtml(msg.message_body.substring(0, 100))}${msg.message_body.length > 100 ? '...' : ''}"</div>
+                    <div class="message-sequence-stats">
+                        <span class="message-sequence-stat"><i class="fas fa-paper-plane"></i> ${stats.sent || 0} sent</span>
+                        <span class="message-sequence-stat"><i class="fas fa-check-double"></i> ${stats.delivered || 0} delivered</span>
+                        <span class="message-sequence-stat"><i class="fas fa-reply"></i> ${stats.responses || 0} responses</span>
+                        ${msg.enable_followup ? `<span class="message-sequence-stat"><i class="fas fa-redo"></i> ${stats.followups_sent || 0} follow-ups</span>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function backToCampaigns() {
+    document.getElementById('campaigns-list-container').style.display = 'block';
+    document.getElementById('campaign-detail-container').style.display = 'none';
+    loadCampaigns();
+}
+
+// Campaign CRUD operations
+async function startCampaign(campaignId) {
+    if (!confirm('Are you sure you want to start this campaign? Messages will begin sending at the scheduled time.')) {
+        return;
+    }
+    
+    try {
+        const result = await API.post(`/campaigns/${campaignId}/start`, {});
+        if (result.success) {
+            showToast('Campaign started successfully!', 'success');
+            viewCampaign(campaignId);
+        } else {
+            showToast(result.error || 'Failed to start campaign', 'error');
+        }
+    } catch (e) {
+        showToast('Error starting campaign', 'error');
+    }
+}
+
+async function pauseCampaign(campaignId) {
+    try {
+        const result = await API.post(`/campaigns/${campaignId}/pause`, {});
+        if (result.success) {
+            showToast('Campaign paused', 'success');
+            loadCampaigns();
+        } else {
+            showToast(result.error || 'Failed to pause campaign', 'error');
+        }
+    } catch (e) {
+        showToast('Error pausing campaign', 'error');
+    }
+}
+
+async function resumeCampaign(campaignId) {
+    try {
+        const result = await API.post(`/campaigns/${campaignId}/resume`, {});
+        if (result.success) {
+            showToast('Campaign resumed', 'success');
+            loadCampaigns();
+        } else {
+            showToast(result.error || 'Failed to resume campaign', 'error');
+        }
+    } catch (e) {
+        showToast('Error resuming campaign', 'error');
+    }
+}
+
+async function editCampaign(campaignId) {
+    // For now, just show the campaign - full edit wizard can be added later
+    viewCampaign(campaignId);
+}
+
+// Campaign Creation Wizard
+function openCampaignWizard() {
+    // Reset state
+    campaignState = {
+        currentStep: 1,
+        campaignData: {
+            name: '',
+            description: '',
+            enrollment_type: 'snapshot',
+            default_send_time: '11:00',
+            filter_criteria: {},
+            messages: []
+        },
+        previewContacts: [],
+        previewCount: 0,
+        overlappingPhones: [],
+        excludeOverlap: false,
+        editingCampaignId: null
+    };
+    
+    // Reset form
+    document.getElementById('campaign-name').value = '';
+    document.getElementById('campaign-description').value = '';
+    document.getElementById('campaign-send-time').value = '11:00';
+    document.querySelector('input[name="enrollment-type"][value="snapshot"]').checked = true;
+    
+    // Reset filters
+    document.getElementById('campaign-filter-borough').value = '';
+    document.getElementById('campaign-filter-role').value = '';
+    document.getElementById('campaign-filter-jobtype').value = '';
+    document.getElementById('campaign-filter-bldgtype').value = '';
+    document.getElementById('campaign-filter-residential').value = '';
+    
+    // Reset messages
+    document.getElementById('campaign-messages-list').innerHTML = `
+        <div class="no-messages-hint">
+            <i class="fas fa-envelope-open-text"></i>
+            <p>No messages yet. Click "Add Message" to start building your campaign sequence.</p>
+        </div>
+    `;
+    
+    // Show step 1
+    showWizardStep(1);
+    
+    showModal('campaign-modal');
+}
+
+function showWizardStep(step) {
+    campaignState.currentStep = step;
+    
+    // Update step indicators
+    document.querySelectorAll('.wizard-step').forEach(el => {
+        const stepNum = parseInt(el.dataset.step);
+        el.classList.remove('active', 'completed');
+        if (stepNum === step) el.classList.add('active');
+        if (stepNum < step) el.classList.add('completed');
+    });
+    
+    // Show/hide content
+    for (let i = 1; i <= 4; i++) {
+        document.getElementById(`campaign-step-${i}`).style.display = i === step ? 'block' : 'none';
+    }
+    
+    // Update buttons
+    document.getElementById('campaign-wizard-back').style.display = step > 1 ? 'inline-flex' : 'none';
+    document.getElementById('campaign-wizard-next').style.display = step < 4 ? 'inline-flex' : 'none';
+    document.getElementById('campaign-wizard-save').style.display = step === 4 ? 'inline-flex' : 'none';
+    
+    // Load step-specific data
+    if (step === 2) {
+        updateCampaignPreview();
+    }
+    if (step === 4) {
+        renderCampaignReview();
+    }
+}
+
+function wizardNext() {
+    if (campaignState.currentStep === 1) {
+        // Validate step 1
+        const name = document.getElementById('campaign-name').value.trim();
+        if (!name) {
+            showToast('Please enter a campaign name', 'error');
+            return;
+        }
+        campaignState.campaignData.name = name;
+        campaignState.campaignData.description = document.getElementById('campaign-description').value.trim();
+        campaignState.campaignData.default_send_time = document.getElementById('campaign-send-time').value;
+        campaignState.campaignData.enrollment_type = document.querySelector('input[name="enrollment-type"]:checked').value;
+    }
+    
+    if (campaignState.currentStep === 2) {
+        // Validate step 2
+        if (campaignState.previewCount === 0) {
+            showToast('No contacts match your filters', 'error');
+            return;
+        }
+        // Save filter criteria
+        campaignState.campaignData.filter_criteria = getCampaignFilters();
+    }
+    
+    if (campaignState.currentStep === 3) {
+        // Validate step 3
+        if (campaignState.campaignData.messages.length === 0) {
+            showToast('Please add at least one message', 'error');
+            return;
+        }
+    }
+    
+    showWizardStep(campaignState.currentStep + 1);
+}
+
+function wizardBack() {
+    showWizardStep(campaignState.currentStep - 1);
+}
+
+function getCampaignFilters() {
+    const filters = {};
+    const borough = document.getElementById('campaign-filter-borough').value;
+    const role = document.getElementById('campaign-filter-role').value;
+    const jobType = document.getElementById('campaign-filter-jobtype').value;
+    const bldgType = document.getElementById('campaign-filter-bldgtype').value;
+    const residential = document.getElementById('campaign-filter-residential').value;
+    
+    if (borough) filters.borough = borough;
+    if (role) filters.role = role;
+    if (jobType) filters.job_type = jobType;
+    if (bldgType) filters.bldg_type = bldgType;
+    if (residential) filters.residential = residential;
+    
+    return filters;
+}
+
+async function updateCampaignPreview() {
+    const filters = getCampaignFilters();
+    const countEl = document.getElementById('campaign-preview-count');
+    countEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>Loading contacts...</span>';
+    
+    try {
+        const result = await API.post('/campaigns/preview-enrollment', { filter_criteria: filters });
+        if (result.success) {
+            campaignState.previewCount = result.count;
+            campaignState.previewContacts = result.sample;
+            countEl.innerHTML = `<i class="fas fa-users"></i> <span><strong>${result.count}</strong> contacts match your filters</span>`;
+            
+            // Check for overlaps
+            if (result.count > 0) {
+                // Get phone numbers from sample for overlap check
+                const phones = result.sample.map(c => c.phone_normalized || c.phone);
+                await checkCampaignOverlap(phones);
+            }
+        }
+    } catch (e) {
+        countEl.innerHTML = '<i class="fas fa-exclamation-circle"></i> <span>Error loading preview</span>';
+    }
+}
+
+async function checkCampaignOverlap(phones) {
+    const warningEl = document.getElementById('campaign-overlap-warning');
+    
+    try {
+        const result = await API.post('/campaigns/check-overlap', { phone_numbers: phones });
+        if (result.success && result.has_overlaps) {
+            const overlaps = result.overlaps;
+            let totalOverlap = 0;
+            const campaignNames = [];
+            
+            for (const [name, phones] of Object.entries(overlaps)) {
+                totalOverlap += phones.length;
+                campaignNames.push(name);
+            }
+            
+            document.getElementById('campaign-overlap-text').textContent = 
+                `${totalOverlap} contacts are already in active campaigns: ${campaignNames.join(', ')}`;
+            warningEl.style.display = 'flex';
+            
+            campaignState.overlappingPhones = Object.values(overlaps).flat();
+        } else {
+            warningEl.style.display = 'none';
+            campaignState.overlappingPhones = [];
+        }
+    } catch (e) {
+        warningEl.style.display = 'none';
+    }
+}
+
+// Campaign Messages
+function openCampaignMessageModal(existingMessage = null) {
+    const modal = document.getElementById('campaign-message-modal');
+    const title = document.getElementById('campaign-message-modal-title');
+    
+    if (existingMessage) {
+        title.textContent = 'Edit Message';
+        document.getElementById('campaign-message-edit-id').value = existingMessage.id || '';
+        document.getElementById('campaign-message-body').value = existingMessage.message_body || '';
+        document.getElementById('campaign-message-days').value = existingMessage.days_after_previous || 0;
+        document.getElementById('campaign-message-time').value = existingMessage.send_time || '';
+        document.getElementById('campaign-message-followup').checked = existingMessage.enable_followup || false;
+        document.getElementById('campaign-followup-days').value = existingMessage.followup_days || 3;
+        document.getElementById('campaign-followup-body').value = existingMessage.followup_body || '';
+        document.getElementById('campaign-message-abtest').checked = existingMessage.has_ab_test || false;
+        document.getElementById('campaign-abtest-variant-b').value = existingMessage.ab_test?.variant_b_body || '';
+    } else {
+        title.textContent = 'Add Message';
+        document.getElementById('campaign-message-edit-id').value = '';
+        document.getElementById('campaign-message-body').value = '';
+        document.getElementById('campaign-message-days').value = campaignState.campaignData.messages.length === 0 ? 0 : 3;
+        document.getElementById('campaign-message-time').value = '';
+        document.getElementById('campaign-message-followup').checked = false;
+        document.getElementById('campaign-followup-days').value = 3;
+        document.getElementById('campaign-followup-body').value = 'Just following up on my last message. Let me know if you have any questions!';
+        document.getElementById('campaign-message-abtest').checked = false;
+        document.getElementById('campaign-abtest-variant-b').value = '';
+    }
+    
+    // Show/hide followup options
+    document.getElementById('followup-options').style.display = 
+        document.getElementById('campaign-message-followup').checked ? 'block' : 'none';
+    document.getElementById('abtest-options').style.display = 
+        document.getElementById('campaign-message-abtest').checked ? 'block' : 'none';
+    
+    showModal('campaign-message-modal');
+}
+
+function saveCampaignMessage() {
+    const body = document.getElementById('campaign-message-body').value.trim();
+    if (!body) {
+        showToast('Please enter a message', 'error');
+        return;
+    }
+    
+    const message = {
+        id: Date.now(), // Temporary ID for local tracking
+        message_body: body,
+        days_after_previous: parseInt(document.getElementById('campaign-message-days').value) || 0,
+        send_time: document.getElementById('campaign-message-time').value || null,
+        enable_followup: document.getElementById('campaign-message-followup').checked,
+        followup_days: parseInt(document.getElementById('campaign-followup-days').value) || 3,
+        followup_body: document.getElementById('campaign-followup-body').value || 'Just following up on my last message. Let me know if you have any questions!',
+        has_ab_test: document.getElementById('campaign-message-abtest').checked,
+        ab_test: document.getElementById('campaign-message-abtest').checked ? {
+            variant_b_body: document.getElementById('campaign-abtest-variant-b').value
+        } : null
+    };
+    
+    const editId = document.getElementById('campaign-message-edit-id').value;
+    if (editId) {
+        // Update existing message
+        const index = campaignState.campaignData.messages.findIndex(m => m.id == editId);
+        if (index >= 0) {
+            message.id = parseInt(editId);
+            campaignState.campaignData.messages[index] = message;
+        }
+    } else {
+        // Add new message
+        campaignState.campaignData.messages.push(message);
+    }
+    
+    renderCampaignMessages();
+    hideModal('campaign-message-modal');
+}
+
+function renderCampaignMessages() {
+    const container = document.getElementById('campaign-messages-list');
+    const messages = campaignState.campaignData.messages;
+    
+    if (messages.length === 0) {
+        container.innerHTML = `
+            <div class="no-messages-hint">
+                <i class="fas fa-envelope-open-text"></i>
+                <p>No messages yet. Click "Add Message" to start building your campaign sequence.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = messages.map((msg, index) => `
+        <div class="campaign-message-item" data-message-id="${msg.id}">
+            <div class="campaign-message-number">${index + 1}</div>
+            <div class="campaign-message-content">
+                <div class="campaign-message-text">${escapeHtml(msg.message_body)}</div>
+                <div class="campaign-message-meta">
+                    <span><i class="fas fa-clock"></i> ${index === 0 ? 'Immediately' : `Day +${msg.days_after_previous}`}</span>
+                    ${msg.send_time ? `<span><i class="fas fa-bell"></i> ${msg.send_time}</span>` : ''}
+                    ${msg.enable_followup ? `<span><i class="fas fa-redo"></i> Follow-up after ${msg.followup_days} days</span>` : ''}
+                    ${msg.has_ab_test ? `<span><i class="fas fa-vial"></i> A/B Test</span>` : ''}
+                </div>
+            </div>
+            <div class="campaign-message-actions">
+                <button class="btn-icon" onclick="editCampaignMessage(${msg.id})" title="Edit">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button class="btn-icon danger" onclick="deleteCampaignMessage(${msg.id})" title="Delete">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function editCampaignMessage(messageId) {
+    const message = campaignState.campaignData.messages.find(m => m.id === messageId);
+    if (message) {
+        openCampaignMessageModal(message);
+    }
+}
+
+function deleteCampaignMessage(messageId) {
+    if (!confirm('Delete this message?')) return;
+    
+    campaignState.campaignData.messages = campaignState.campaignData.messages.filter(m => m.id !== messageId);
+    renderCampaignMessages();
+}
+
+function insertCampaignVar(variable) {
+    const textarea = document.getElementById('campaign-message-body');
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    textarea.value = text.substring(0, start) + variable + text.substring(end);
+    textarea.focus();
+    textarea.selectionStart = textarea.selectionEnd = start + variable.length;
+}
+
+function renderCampaignReview() {
+    const data = campaignState.campaignData;
+    const container = document.getElementById('campaign-review');
+    
+    container.innerHTML = `
+        <div class="campaign-review-section">
+            <h5>Campaign Details</h5>
+            <div class="campaign-review-value">${escapeHtml(data.name)}</div>
+            ${data.description ? `<p style="color: var(--text-secondary);">${escapeHtml(data.description)}</p>` : ''}
+        </div>
+        <div class="campaign-review-section">
+            <h5>Enrollment</h5>
+            <div class="campaign-review-value">
+                ${data.enrollment_type === 'snapshot' ? '📷 Snapshot' : '🔄 Dynamic'} • 
+                ${campaignState.previewCount} contacts
+            </div>
+            <p style="color: var(--text-secondary); margin-top: 4px;">
+                Filters: ${Object.entries(data.filter_criteria).map(([k, v]) => `${k}: ${v}`).join(', ') || 'None'}
+            </p>
+        </div>
+        <div class="campaign-review-section">
+            <h5>Messages (${data.messages.length})</h5>
+            ${data.messages.map((msg, i) => `
+                <div style="padding: 8px 0; border-bottom: 1px solid var(--border-color);">
+                    <strong>Message ${i + 1}</strong> - ${i === 0 ? 'Immediately' : `Day +${msg.days_after_previous}`}
+                    ${msg.enable_followup ? '<span style="color: var(--warning-color);"> • Follow-up enabled</span>' : ''}
+                    ${msg.has_ab_test ? '<span style="color: var(--primary-color);"> • A/B Test</span>' : ''}
+                    <p style="color: var(--text-secondary); margin: 4px 0 0 0; font-size: 0.9rem;">
+                        "${escapeHtml(msg.message_body.substring(0, 80))}${msg.message_body.length > 80 ? '...' : ''}"
+                    </p>
+                </div>
+            `).join('')}
+        </div>
+        <div class="campaign-review-section">
+            <h5>Schedule</h5>
+            <div class="campaign-review-value">
+                Messages sent daily at ${data.default_send_time} EST
+            </div>
+        </div>
+    `;
+}
+
+async function saveCampaign() {
+    const data = campaignState.campaignData;
+    
+    try {
+        // 1. Create the campaign
+        const campaignResult = await API.post('/campaigns', {
+            name: data.name,
+            description: data.description,
+            enrollment_type: data.enrollment_type,
+            filter_criteria: data.filter_criteria,
+            default_send_time: data.default_send_time
+        });
+        
+        if (!campaignResult.success) {
+            showToast(campaignResult.error || 'Failed to create campaign', 'error');
+            return;
+        }
+        
+        const campaignId = campaignResult.campaign.id;
+        
+        // 2. Add messages
+        for (const msg of data.messages) {
+            const msgResult = await API.post(`/campaigns/${campaignId}/messages`, {
+                message_body: msg.message_body,
+                days_after_previous: msg.days_after_previous,
+                send_time: msg.send_time,
+                enable_followup: msg.enable_followup,
+                followup_days: msg.followup_days,
+                followup_body: msg.followup_body
+            });
+            
+            // If has A/B test, set it up
+            if (msg.has_ab_test && msg.ab_test?.variant_b_body && msgResult.success) {
+                await API.post(`/campaigns/messages/${msgResult.message.id}/ab-test`, {
+                    variant_b_body: msg.ab_test.variant_b_body
+                });
+            }
+        }
+        
+        // 3. Enroll contacts
+        const enrollResult = await API.post(`/campaigns/${campaignId}/enroll`, {
+            use_filters: true,
+            exclude_phones: campaignState.excludeOverlap ? campaignState.overlappingPhones : []
+        });
+        
+        showToast(`Campaign created with ${enrollResult.enrolled_count || 0} contacts enrolled!`, 'success');
+        hideModal('campaign-modal');
+        loadCampaigns();
+        
+    } catch (e) {
+        showToast('Error creating campaign', 'error');
+        console.error(e);
+    }
+}
+
+// Initialize campaign event listeners
+function initCampaignEventListeners() {
+    // New campaign button
+    document.getElementById('new-campaign-btn')?.addEventListener('click', openCampaignWizard);
+    
+    // Back to campaigns list
+    document.getElementById('back-to-campaigns')?.addEventListener('click', backToCampaigns);
+    
+    // Wizard navigation
+    document.getElementById('campaign-wizard-next')?.addEventListener('click', wizardNext);
+    document.getElementById('campaign-wizard-back')?.addEventListener('click', wizardBack);
+    document.getElementById('campaign-wizard-save')?.addEventListener('click', saveCampaign);
+    
+    // Filter changes
+    ['campaign-filter-borough', 'campaign-filter-role', 'campaign-filter-jobtype', 
+     'campaign-filter-bldgtype', 'campaign-filter-residential'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', updateCampaignPreview);
+    });
+    
+    // Overlap handling
+    document.getElementById('campaign-exclude-overlap')?.addEventListener('click', () => {
+        campaignState.excludeOverlap = true;
+        document.getElementById('campaign-overlap-warning').style.display = 'none';
+        showToast('Overlapping contacts will be excluded', 'success');
+    });
+    
+    document.getElementById('campaign-include-overlap')?.addEventListener('click', () => {
+        campaignState.excludeOverlap = false;
+        document.getElementById('campaign-overlap-warning').style.display = 'none';
+        showToast('Overlapping contacts will be included', 'success');
+    });
+    
+    // Add message button
+    document.getElementById('add-campaign-message-btn')?.addEventListener('click', () => openCampaignMessageModal());
+    
+    // Save message button
+    document.getElementById('save-campaign-message-btn')?.addEventListener('click', saveCampaignMessage);
+    
+    // Follow-up checkbox toggle
+    document.getElementById('campaign-message-followup')?.addEventListener('change', (e) => {
+        document.getElementById('followup-options').style.display = e.target.checked ? 'block' : 'none';
+    });
+    
+    // A/B test checkbox toggle
+    document.getElementById('campaign-message-abtest')?.addEventListener('change', (e) => {
+        document.getElementById('abtest-options').style.display = e.target.checked ? 'block' : 'none';
+    });
+}
+
+// Add to document ready
+document.addEventListener('DOMContentLoaded', () => {
+    initCampaignEventListeners();
+});

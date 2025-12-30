@@ -1,11 +1,17 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from dateutil.rrule import rrule, DAILY, WEEKLY, MONTHLY, MO, TU, WE, TH, FR, SA, SU
+from zoneinfo import ZoneInfo
 import logging
 import json
+import re
 
-from database import get_session, ScheduledBulkMessage
+from database import (
+    get_session, ScheduledBulkMessage,
+    Campaign, CampaignMessage, CampaignEnrollment, CampaignSend, CampaignABTest,
+    CampaignStatus, EnrollmentStatus
+)
 from twilio_service import twilio_service
 
 logger = logging.getLogger(__name__)
@@ -40,8 +46,23 @@ class MessageScheduler:
             id='check_scheduled_messages',
             replace_existing=True
         )
+        # Check for due campaign messages every minute
+        self.scheduler.add_job(
+            func=self._check_and_send_campaign_messages,
+            trigger=IntervalTrigger(seconds=60),
+            id='check_campaign_messages',
+            replace_existing=True
+        )
+        # Check for due follow-ups every minute
+        self.scheduler.add_job(
+            func=self._check_and_send_followups,
+            trigger=IntervalTrigger(seconds=60),
+            id='check_campaign_followups',
+            replace_existing=True
+        )
         self.scheduler.start()
         logger.info("Message scheduler started - checking for due messages every 30 seconds")
+        logger.info("Campaign scheduler started - checking campaigns and follow-ups every 60 seconds")
         logger.info(f"SAFETY: Max recipients per scheduled message: {MAX_RECIPIENTS_PER_SCHEDULE}")
     
     def _calculate_next_occurrence(self, bulk_msg):
@@ -376,6 +397,413 @@ class MessageScheduler:
         result = [m.to_dict() for m in messages]
         session.close()
         return result
+    
+    # =========================================================================
+    # CAMPAIGN SCHEDULING
+    # =========================================================================
+    
+    def _get_eastern_time(self) -> datetime:
+        """Get current time in Eastern timezone"""
+        eastern = ZoneInfo('America/New_York')
+        return datetime.now(eastern)
+    
+    def _parse_send_time(self, time_str: str) -> tuple:
+        """Parse HH:MM time string to (hour, minute)"""
+        try:
+            parts = time_str.split(':')
+            return int(parts[0]), int(parts[1])
+        except:
+            return 11, 0  # Default to 11:00 AM
+    
+    def _is_send_time_due(self, send_time: str) -> bool:
+        """
+        Check if the specified send time (HH:MM in EST) has passed today.
+        Returns True if we're past the send time for today.
+        """
+        now = self._get_eastern_time()
+        hour, minute = self._parse_send_time(send_time)
+        
+        # Create today's target time in Eastern
+        eastern = ZoneInfo('America/New_York')
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        
+        return now >= target
+    
+    def _fill_campaign_template(self, template: str, contact: dict) -> str:
+        """Fill template variables with contact data for campaigns"""
+        result = template
+        
+        # Contact-based variables
+        result = result.replace('{name}', contact.get('contact_name') or contact.get('name') or '')
+        result = result.replace('{company}', contact.get('contact_company') or contact.get('company') or '')
+        result = result.replace('{role}', contact.get('role') or '')
+        result = result.replace('{phone}', contact.get('phone_number') or contact.get('phone') or '')
+        
+        # Date/time variables (Eastern Time)
+        now_eastern = self._get_eastern_time()
+        result = result.replace('{date}', now_eastern.strftime('%m/%d/%Y'))
+        result = result.replace('{time}', now_eastern.strftime('%I:%M %p'))
+        
+        # Clean up any empty variable results (double spaces)
+        result = re.sub(r' +', ' ', result).strip()
+        
+        return result
+    
+    def _check_and_send_campaign_messages(self):
+        """
+        Check for active campaigns and send due messages.
+        This runs every minute to process campaign message schedules.
+        """
+        session = get_session()
+        try:
+            # Get all active campaigns
+            active_campaigns = session.query(Campaign).filter(
+                Campaign.status == CampaignStatus.ACTIVE.value
+            ).all()
+            
+            for campaign in active_campaigns:
+                self._process_campaign(campaign.id)
+                
+        except Exception as e:
+            logger.error(f"Error checking campaign messages: {e}")
+        finally:
+            session.close()
+    
+    def _process_campaign(self, campaign_id: int):
+        """
+        Process a single campaign - check what messages need to be sent.
+        """
+        session = get_session()
+        try:
+            campaign = session.query(Campaign).filter(Campaign.id == campaign_id).first()
+            
+            if not campaign or campaign.status != CampaignStatus.ACTIVE.value:
+                return
+            
+            # Get campaign messages in order
+            messages = session.query(CampaignMessage).filter(
+                CampaignMessage.campaign_id == campaign_id
+            ).order_by(CampaignMessage.sequence_order).all()
+            
+            if not messages:
+                return
+            
+            # Get the send time to use
+            send_time = campaign.default_send_time or '11:00'
+            
+            # Check if we've passed today's send time
+            if not self._is_send_time_due(send_time):
+                return
+            
+            # Get all active enrollments
+            enrollments = session.query(CampaignEnrollment).filter(
+                CampaignEnrollment.campaign_id == campaign_id,
+                CampaignEnrollment.status.in_([EnrollmentStatus.ACTIVE.value, EnrollmentStatus.ENGAGED.value])
+            ).all()
+            
+            if not enrollments:
+                # No active enrollments - mark campaign complete
+                campaign.status = CampaignStatus.COMPLETED.value
+                campaign.completed_at = datetime.utcnow()
+                campaign.response_tracking_ends_at = datetime.utcnow() + timedelta(days=30)
+                session.commit()
+                logger.info(f"Campaign {campaign_id} completed - no active enrollments")
+                return
+            
+            # Process each enrollment
+            all_complete = True
+            
+            for enrollment in enrollments:
+                next_step = enrollment.current_step + 1
+                
+                # Check if there's a next message
+                if next_step > len(messages):
+                    # This enrollment is complete
+                    enrollment.status = EnrollmentStatus.COMPLETED.value
+                    continue
+                
+                all_complete = False
+                
+                # Get the next message to send
+                next_message = messages[next_step - 1]  # 0-indexed
+                
+                # Check if it's time to send this message
+                if self._should_send_message(enrollment, next_message, campaign.started_at):
+                    self._send_campaign_message(enrollment, next_message, campaign)
+            
+            session.commit()
+            
+            # If all enrollments are complete, mark campaign complete
+            if all_complete:
+                campaign.status = CampaignStatus.COMPLETED.value
+                campaign.completed_at = datetime.utcnow()
+                campaign.response_tracking_ends_at = datetime.utcnow() + timedelta(days=30)
+                session.commit()
+                logger.info(f"Campaign {campaign_id} completed - all messages sent")
+                
+        except Exception as e:
+            logger.error(f"Error processing campaign {campaign_id}: {e}")
+            session.rollback()
+        finally:
+            session.close()
+    
+    def _should_send_message(self, enrollment: CampaignEnrollment, message: CampaignMessage, campaign_started: datetime) -> bool:
+        """
+        Determine if a message should be sent to this enrollment.
+        Checks the days_after_previous setting.
+        """
+        now = datetime.utcnow()
+        
+        if message.sequence_order == 1:
+            # First message - check if campaign just started (send immediately)
+            # Only send if we haven't sent it yet (current_step = 0)
+            if enrollment.current_step == 0:
+                return True
+            return False
+        
+        # For subsequent messages, check days_after_previous
+        if enrollment.last_message_at is None:
+            return False
+        
+        days_since_last = (now - enrollment.last_message_at).days
+        
+        return days_since_last >= message.days_after_previous
+    
+    def _send_campaign_message(self, enrollment: CampaignEnrollment, message: CampaignMessage, campaign: Campaign):
+        """
+        Send a campaign message to a single enrollment.
+        """
+        session = get_session()
+        try:
+            # Check if already sent today for this message
+            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            existing_send = session.query(CampaignSend).filter(
+                CampaignSend.enrollment_id == enrollment.id,
+                CampaignSend.campaign_message_id == message.id,
+                CampaignSend.message_type == 'scheduled',
+                CampaignSend.created_at >= today_start
+            ).first()
+            
+            if existing_send:
+                return  # Already sent today
+            
+            # Determine message body (handle A/B testing)
+            message_body = message.message_body
+            ab_variant = None
+            
+            if message.has_ab_test and enrollment.ab_variant:
+                ab_test = session.query(CampaignABTest).filter(
+                    CampaignABTest.campaign_message_id == message.id
+                ).first()
+                
+                if ab_test and enrollment.ab_variant == 'B':
+                    message_body = ab_test.variant_b_body
+                ab_variant = enrollment.ab_variant
+            
+            # Fill template variables
+            contact_dict = {
+                'contact_name': enrollment.contact_name,
+                'contact_company': enrollment.contact_company,
+                'phone_number': enrollment.phone_number
+            }
+            message_body = self._fill_campaign_template(message_body, contact_dict)
+            
+            # Create send record
+            send = CampaignSend(
+                campaign_id=campaign.id,
+                campaign_message_id=message.id,
+                enrollment_id=enrollment.id,
+                phone_number=enrollment.phone_number,
+                message_type='scheduled',
+                message_body=message_body,
+                ab_variant=ab_variant,
+                status='pending',
+                scheduled_for=datetime.utcnow()
+            )
+            session.add(send)
+            session.flush()
+            
+            # Send via Twilio
+            result = twilio_service.send_sms(enrollment.phone_number, message_body)
+            
+            if result['success']:
+                send.status = 'sent'
+                send.twilio_sid = result.get('sid')
+                send.sent_at = datetime.utcnow()
+                
+                # Update enrollment progress
+                enrollment.current_step = message.sequence_order
+                enrollment.last_message_at = datetime.utcnow()
+                enrollment.last_message_id = message.id
+                
+                # Update A/B test stats
+                if ab_variant and message.has_ab_test:
+                    ab_test = session.query(CampaignABTest).filter(
+                        CampaignABTest.campaign_message_id == message.id
+                    ).first()
+                    if ab_test:
+                        if ab_variant == 'A':
+                            ab_test.variant_a_sent = (ab_test.variant_a_sent or 0) + 1
+                        else:
+                            ab_test.variant_b_sent = (ab_test.variant_b_sent or 0) + 1
+                
+                logger.info(f"Campaign message sent: campaign={campaign.id}, message={message.id}, to={enrollment.phone_number}")
+            else:
+                send.status = 'failed'
+                send.error_message = result.get('error', 'Unknown error')
+                logger.error(f"Campaign message failed: {result.get('error')}")
+            
+            session.commit()
+            
+        except Exception as e:
+            logger.error(f"Error sending campaign message: {e}")
+            session.rollback()
+        finally:
+            session.close()
+    
+    def _check_and_send_followups(self):
+        """
+        Check for due follow-up messages and send them.
+        This runs every minute.
+        """
+        session = get_session()
+        try:
+            # Get all active campaigns
+            active_campaigns = session.query(Campaign).filter(
+                Campaign.status == CampaignStatus.ACTIVE.value
+            ).all()
+            
+            for campaign in active_campaigns:
+                self._process_followups(campaign.id)
+                
+        except Exception as e:
+            logger.error(f"Error checking follow-ups: {e}")
+        finally:
+            session.close()
+    
+    def _process_followups(self, campaign_id: int):
+        """
+        Process follow-ups for a campaign.
+        For each enrollment, check if they need a follow-up on their last message.
+        """
+        session = get_session()
+        try:
+            campaign = session.query(Campaign).filter(Campaign.id == campaign_id).first()
+            
+            if not campaign or campaign.status != CampaignStatus.ACTIVE.value:
+                return
+            
+            send_time = campaign.default_send_time or '11:00'
+            if not self._is_send_time_due(send_time):
+                return
+            
+            # Get enrollments that haven't responded to their last message
+            enrollments = session.query(CampaignEnrollment).filter(
+                CampaignEnrollment.campaign_id == campaign_id,
+                CampaignEnrollment.status.in_([EnrollmentStatus.ACTIVE.value]),
+                CampaignEnrollment.last_message_id.isnot(None)
+            ).all()
+            
+            now = datetime.utcnow()
+            
+            for enrollment in enrollments:
+                # Get the last message sent
+                last_message = session.query(CampaignMessage).filter(
+                    CampaignMessage.id == enrollment.last_message_id
+                ).first()
+                
+                if not last_message or not last_message.enable_followup:
+                    continue
+                
+                # Check if follow-up is due
+                days_since_message = (now - enrollment.last_message_at).days if enrollment.last_message_at else 0
+                
+                if days_since_message < last_message.followup_days:
+                    continue
+                
+                # Check if we already sent a follow-up for this message
+                existing_followup = session.query(CampaignSend).filter(
+                    CampaignSend.enrollment_id == enrollment.id,
+                    CampaignSend.campaign_message_id == last_message.id,
+                    CampaignSend.message_type == 'followup'
+                ).first()
+                
+                if existing_followup:
+                    continue
+                
+                # Check if they responded to the original message
+                original_send = session.query(CampaignSend).filter(
+                    CampaignSend.enrollment_id == enrollment.id,
+                    CampaignSend.campaign_message_id == last_message.id,
+                    CampaignSend.message_type == 'scheduled'
+                ).first()
+                
+                if original_send and original_send.response_received:
+                    continue  # They responded, no follow-up needed
+                
+                # Send follow-up
+                self._send_followup(enrollment, last_message, campaign)
+            
+            session.commit()
+            
+        except Exception as e:
+            logger.error(f"Error processing follow-ups for campaign {campaign_id}: {e}")
+            session.rollback()
+        finally:
+            session.close()
+    
+    def _send_followup(self, enrollment: CampaignEnrollment, message: CampaignMessage, campaign: Campaign):
+        """
+        Send a follow-up message.
+        """
+        session = get_session()
+        try:
+            # Get follow-up body
+            followup_body = message.followup_body or "Just following up on my last message. Let me know if you have any questions!"
+            
+            # Fill template variables
+            contact_dict = {
+                'contact_name': enrollment.contact_name,
+                'contact_company': enrollment.contact_company,
+                'phone_number': enrollment.phone_number
+            }
+            followup_body = self._fill_campaign_template(followup_body, contact_dict)
+            
+            # Create send record
+            send = CampaignSend(
+                campaign_id=campaign.id,
+                campaign_message_id=message.id,
+                enrollment_id=enrollment.id,
+                phone_number=enrollment.phone_number,
+                message_type='followup',
+                message_body=followup_body,
+                ab_variant=enrollment.ab_variant,
+                status='pending',
+                scheduled_for=datetime.utcnow()
+            )
+            session.add(send)
+            session.flush()
+            
+            # Send via Twilio
+            result = twilio_service.send_sms(enrollment.phone_number, followup_body)
+            
+            if result['success']:
+                send.status = 'sent'
+                send.twilio_sid = result.get('sid')
+                send.sent_at = datetime.utcnow()
+                logger.info(f"Follow-up sent: campaign={campaign.id}, message={message.id}, to={enrollment.phone_number}")
+            else:
+                send.status = 'failed'
+                send.error_message = result.get('error', 'Unknown error')
+                logger.error(f"Follow-up failed: {result.get('error')}")
+            
+            session.commit()
+            
+        except Exception as e:
+            logger.error(f"Error sending follow-up: {e}")
+            session.rollback()
+        finally:
+            session.close()
     
     def shutdown(self):
         """Shutdown the scheduler"""

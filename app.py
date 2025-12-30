@@ -36,6 +36,7 @@ from auth import (
     login_required,
     role_required
 )
+from campaign_service import campaign_service
 
 logger = logging.getLogger(__name__)
 
@@ -953,6 +954,12 @@ def incoming_message():
     # Store the incoming message
     twilio_service.process_incoming_message(from_number, body, twilio_sid)
     
+    # Track response in campaigns
+    try:
+        campaign_service.record_response(from_number, body)
+    except Exception as e:
+        logger.error(f"Error recording campaign response: {e}")
+    
     # Return empty TwiML response (no auto-reply)
     response = MessagingResponse()
     return str(response)
@@ -1002,6 +1009,317 @@ def get_stats():
             'received_messages': received_messages
         }
     })
+
+
+# ============ Campaign API Endpoints ============
+
+@app.route('/api/campaigns', methods=['GET'])
+@login_required
+def list_campaigns():
+    """List all campaigns"""
+    status = request.args.get('status')
+    campaigns = campaign_service.list_campaigns(status=status, include_stats=True)
+    return jsonify({'success': True, 'campaigns': campaigns})
+
+
+@app.route('/api/campaigns', methods=['POST'])
+@login_required
+def create_campaign():
+    """Create a new campaign"""
+    data = request.get_json()
+    
+    if not data.get('name'):
+        return jsonify({'success': False, 'error': 'Campaign name is required'}), 400
+    
+    user = get_current_user()
+    
+    campaign = campaign_service.create_campaign(
+        name=data['name'],
+        description=data.get('description'),
+        enrollment_type=data.get('enrollment_type', 'snapshot'),
+        filter_criteria=data.get('filter_criteria'),
+        default_send_time=data.get('default_send_time', '11:00'),
+        created_by=user.get('id') if user else None
+    )
+    
+    return jsonify({'success': True, 'campaign': campaign})
+
+
+@app.route('/api/campaigns/<int:campaign_id>', methods=['GET'])
+@login_required
+def get_campaign(campaign_id):
+    """Get campaign details"""
+    campaign = campaign_service.get_campaign(campaign_id, include_stats=True)
+    
+    if not campaign:
+        return jsonify({'success': False, 'error': 'Campaign not found'}), 404
+    
+    return jsonify({'success': True, 'campaign': campaign})
+
+
+@app.route('/api/campaigns/<int:campaign_id>', methods=['PUT'])
+@login_required
+def update_campaign(campaign_id):
+    """Update campaign properties"""
+    data = request.get_json()
+    
+    campaign = campaign_service.update_campaign(campaign_id, **data)
+    
+    if not campaign:
+        return jsonify({'success': False, 'error': 'Campaign not found'}), 404
+    
+    return jsonify({'success': True, 'campaign': campaign})
+
+
+@app.route('/api/campaigns/<int:campaign_id>', methods=['DELETE'])
+@login_required
+def delete_campaign(campaign_id):
+    """Delete a campaign (only if draft)"""
+    try:
+        success = campaign_service.delete_campaign(campaign_id)
+        if not success:
+            return jsonify({'success': False, 'error': 'Campaign not found'}), 404
+        return jsonify({'success': True})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/campaigns/<int:campaign_id>/stats', methods=['GET'])
+@login_required
+def get_campaign_stats(campaign_id):
+    """Get detailed campaign statistics"""
+    stats = campaign_service.get_campaign_stats(campaign_id)
+    
+    if not stats:
+        return jsonify({'success': False, 'error': 'Campaign not found'}), 404
+    
+    return jsonify({'success': True, 'stats': stats})
+
+
+# ============ Campaign Messages API ============
+
+@app.route('/api/campaigns/<int:campaign_id>/messages', methods=['POST'])
+@login_required
+def add_campaign_message(campaign_id):
+    """Add a message to a campaign sequence"""
+    data = request.get_json()
+    
+    if not data.get('message_body'):
+        return jsonify({'success': False, 'error': 'Message body is required'}), 400
+    
+    message = campaign_service.add_message(
+        campaign_id=campaign_id,
+        message_body=data['message_body'],
+        days_after_previous=data.get('days_after_previous', 0),
+        send_time=data.get('send_time'),
+        enable_followup=data.get('enable_followup', False),
+        followup_days=data.get('followup_days', 3),
+        followup_body=data.get('followup_body'),
+        sequence_order=data.get('sequence_order')
+    )
+    
+    if not message:
+        return jsonify({'success': False, 'error': 'Campaign not found'}), 404
+    
+    return jsonify({'success': True, 'message': message})
+
+
+@app.route('/api/campaigns/messages/<int:message_id>', methods=['PUT'])
+@login_required
+def update_campaign_message(message_id):
+    """Update a campaign message"""
+    data = request.get_json()
+    
+    message = campaign_service.update_message(message_id, **data)
+    
+    if not message:
+        return jsonify({'success': False, 'error': 'Message not found'}), 404
+    
+    return jsonify({'success': True, 'message': message})
+
+
+@app.route('/api/campaigns/messages/<int:message_id>', methods=['DELETE'])
+@login_required
+def delete_campaign_message(message_id):
+    """Delete a campaign message"""
+    try:
+        success = campaign_service.delete_message(message_id)
+        if not success:
+            return jsonify({'success': False, 'error': 'Message not found'}), 404
+        return jsonify({'success': True})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/campaigns/<int:campaign_id>/messages/reorder', methods=['POST'])
+@login_required
+def reorder_campaign_messages(campaign_id):
+    """Reorder campaign messages"""
+    data = request.get_json()
+    
+    if not data.get('message_order'):
+        return jsonify({'success': False, 'error': 'message_order array is required'}), 400
+    
+    success = campaign_service.reorder_messages(campaign_id, data['message_order'])
+    
+    return jsonify({'success': success})
+
+
+# ============ Campaign A/B Testing API ============
+
+@app.route('/api/campaigns/messages/<int:message_id>/ab-test', methods=['POST'])
+@login_required
+def setup_ab_test(message_id):
+    """Set up A/B test for a message"""
+    data = request.get_json()
+    
+    if not data.get('variant_b_body'):
+        return jsonify({'success': False, 'error': 'variant_b_body is required'}), 400
+    
+    ab_test = campaign_service.setup_ab_test(message_id, data['variant_b_body'])
+    
+    if not ab_test:
+        return jsonify({'success': False, 'error': 'Message not found'}), 404
+    
+    return jsonify({'success': True, 'ab_test': ab_test})
+
+
+@app.route('/api/campaigns/messages/<int:message_id>/ab-test', methods=['DELETE'])
+@login_required
+def remove_ab_test(message_id):
+    """Remove A/B test from a message"""
+    success = campaign_service.remove_ab_test(message_id)
+    
+    if not success:
+        return jsonify({'success': False, 'error': 'A/B test not found'}), 404
+    
+    return jsonify({'success': True})
+
+
+# ============ Campaign Enrollment API ============
+
+@app.route('/api/campaigns/preview-enrollment', methods=['POST'])
+@login_required
+def preview_enrollment():
+    """Preview contacts that would be enrolled based on filters"""
+    data = request.get_json()
+    filter_criteria = data.get('filter_criteria', {})
+    
+    count, sample = campaign_service.preview_enrollment(filter_criteria)
+    
+    return jsonify({
+        'success': True,
+        'count': count,
+        'sample': sample
+    })
+
+
+@app.route('/api/campaigns/check-overlap', methods=['POST'])
+@login_required
+def check_campaign_overlap():
+    """Check if contacts are already in active campaigns"""
+    data = request.get_json()
+    phone_numbers = data.get('phone_numbers', [])
+    
+    if not phone_numbers:
+        return jsonify({'success': True, 'overlaps': {}})
+    
+    overlaps = campaign_service.check_overlap(phone_numbers)
+    
+    return jsonify({
+        'success': True,
+        'overlaps': overlaps,
+        'has_overlaps': len(overlaps) > 0
+    })
+
+
+@app.route('/api/campaigns/<int:campaign_id>/enroll', methods=['POST'])
+@login_required
+def enroll_contacts(campaign_id):
+    """Enroll contacts in a campaign"""
+    data = request.get_json()
+    
+    try:
+        count = campaign_service.enroll_contacts(
+            campaign_id=campaign_id,
+            contacts=data.get('contacts'),
+            use_filters=data.get('use_filters', False),
+            exclude_phones=data.get('exclude_phones')
+        )
+        
+        return jsonify({'success': True, 'enrolled_count': count})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/campaigns/<int:campaign_id>/enrollments', methods=['GET'])
+@login_required
+def get_campaign_enrollments(campaign_id):
+    """Get campaign enrollments"""
+    status = request.args.get('status')
+    limit = int(request.args.get('limit', 100))
+    offset = int(request.args.get('offset', 0))
+    
+    enrollments, total = campaign_service.get_enrollments(
+        campaign_id=campaign_id,
+        status=status,
+        limit=limit,
+        offset=offset
+    )
+    
+    return jsonify({
+        'success': True,
+        'enrollments': enrollments,
+        'total': total,
+        'limit': limit,
+        'offset': offset
+    })
+
+
+# ============ Campaign Lifecycle API ============
+
+@app.route('/api/campaigns/<int:campaign_id>/start', methods=['POST'])
+@login_required
+def start_campaign(campaign_id):
+    """Start a campaign"""
+    try:
+        campaign = campaign_service.start_campaign(campaign_id)
+        return jsonify({'success': True, 'campaign': campaign})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/campaigns/<int:campaign_id>/pause', methods=['POST'])
+@login_required
+def pause_campaign(campaign_id):
+    """Pause a campaign"""
+    try:
+        campaign = campaign_service.pause_campaign(campaign_id)
+        return jsonify({'success': True, 'campaign': campaign})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/campaigns/<int:campaign_id>/resume', methods=['POST'])
+@login_required
+def resume_campaign(campaign_id):
+    """Resume a paused campaign"""
+    try:
+        campaign = campaign_service.resume_campaign(campaign_id)
+        return jsonify({'success': True, 'campaign': campaign})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/campaigns/<int:campaign_id>/complete', methods=['POST'])
+@login_required
+def complete_campaign(campaign_id):
+    """Mark a campaign as completed"""
+    try:
+        campaign = campaign_service.complete_campaign(campaign_id)
+        return jsonify({'success': True, 'campaign': campaign})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 
 # ============ Error Handlers ============

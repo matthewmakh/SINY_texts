@@ -52,6 +52,9 @@
                 <a href="#" class="nav-item" data-view="compose">
                     <i class="fas fa-paper-plane"></i> Send Message
                 </a>
+                <a href="#" class="nav-item" data-view="campaigns">
+                    <i class="fas fa-bullhorn"></i> Campaigns
+                </a>
                 <a href="#" class="nav-item" data-view="scheduled">
                     <i class="fas fa-clock"></i> Scheduled
                 </a>
@@ -291,6 +294,31 @@
                             <i class="fas fa-paper-plane"></i> Send Now
                         </button>
                     </div>
+                </div>
+            </section>
+
+            <!-- Campaigns View -->
+            <section id="campaigns-view" class="view">
+                <div class="view-header">
+                    <h2>Campaigns</h2>
+                    <button class="btn btn-primary" id="new-campaign-btn">
+                        <i class="fas fa-plus"></i> New Campaign
+                    </button>
+                </div>
+                
+                <!-- Campaign List -->
+                <div id="campaigns-list-container">
+                    <div class="campaigns-list" id="campaigns-list">
+                        <!-- Campaigns will be loaded here -->
+                    </div>
+                </div>
+                
+                <!-- Campaign Detail View (hidden by default) -->
+                <div id="campaign-detail-container" style="display: none;">
+                    <button class="btn btn-secondary btn-sm" id="back-to-campaigns">
+                        <i class="fas fa-arrow-left"></i> Back to Campaigns
+                    </button>
+                    <div id="campaign-detail-content"></div>
                 </div>
             </section>
 
@@ -686,6 +714,263 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary modal-cancel">Cancel</button>
                 <button class="btn btn-primary" id="save-user-btn">Save User</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Campaign Creation Modal -->
+    <div class="modal" id="campaign-modal">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3 id="campaign-modal-title">Create Campaign</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Wizard Steps -->
+                <div class="wizard-steps">
+                    <div class="wizard-step active" data-step="1">
+                        <span class="step-number">1</span>
+                        <span class="step-label">Details</span>
+                    </div>
+                    <div class="wizard-step" data-step="2">
+                        <span class="step-number">2</span>
+                        <span class="step-label">Contacts</span>
+                    </div>
+                    <div class="wizard-step" data-step="3">
+                        <span class="step-number">3</span>
+                        <span class="step-label">Messages</span>
+                    </div>
+                    <div class="wizard-step" data-step="4">
+                        <span class="step-number">4</span>
+                        <span class="step-label">Review</span>
+                    </div>
+                </div>
+                
+                <!-- Step 1: Campaign Details -->
+                <div class="wizard-content" id="campaign-step-1">
+                    <div class="form-group">
+                        <label for="campaign-name">Campaign Name *</label>
+                        <input type="text" id="campaign-name" placeholder="e.g., Brooklyn Owners Q1 Outreach" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="campaign-description">Description</label>
+                        <textarea id="campaign-description" rows="2" placeholder="Brief description of campaign purpose..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Enrollment Type</label>
+                        <div class="enrollment-type-options">
+                            <label class="radio-card">
+                                <input type="radio" name="enrollment-type" value="snapshot" checked>
+                                <div class="radio-card-content">
+                                    <i class="fas fa-camera"></i>
+                                    <strong>Snapshot</strong>
+                                    <span class="tooltip-trigger" data-tooltip="Locks in contacts at campaign start. New permits added later won't be included. Best for targeted, one-time campaigns.">ⓘ</span>
+                                </div>
+                            </label>
+                            <label class="radio-card">
+                                <input type="radio" name="enrollment-type" value="dynamic">
+                                <div class="radio-card-content">
+                                    <i class="fas fa-sync-alt"></i>
+                                    <strong>Dynamic</strong>
+                                    <span class="tooltip-trigger" data-tooltip="Re-runs filters before each message. New matching contacts join mid-campaign. Best for ongoing outreach.">ⓘ</span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="campaign-send-time">Default Send Time (EST)</label>
+                        <input type="time" id="campaign-send-time" value="11:00">
+                        <small class="text-muted">Messages will be sent at this time each day they're scheduled</small>
+                    </div>
+                </div>
+                
+                <!-- Step 2: Contact Selection -->
+                <div class="wizard-content" id="campaign-step-2" style="display: none;">
+                    <h4>Select Contacts Using Filters</h4>
+                    <div class="campaign-filters">
+                        <div class="filter-row">
+                            <div class="filter-group">
+                                <label>Borough</label>
+                                <select id="campaign-filter-borough">
+                                    <option value="">All Boroughs</option>
+                                    <option value="MANHATTAN">Manhattan</option>
+                                    <option value="BROOKLYN">Brooklyn</option>
+                                    <option value="QUEENS">Queens</option>
+                                    <option value="BRONX">Bronx</option>
+                                    <option value="STATEN ISLAND">Staten Island</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label>Role</label>
+                                <select id="campaign-filter-role">
+                                    <option value="">All Roles</option>
+                                    <option value="Owner">Owner</option>
+                                    <option value="Permittee">Permittee</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label>Job Type</label>
+                                <select id="campaign-filter-jobtype">
+                                    <option value="">All Job Types</option>
+                                    <option value="A1">A1 - Alteration Type 1</option>
+                                    <option value="A2">A2 - Alteration Type 2</option>
+                                    <option value="A3">A3 - Alteration Type 3</option>
+                                    <option value="NB">NB - New Building</option>
+                                    <option value="DM">DM - Demolition</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="filter-row">
+                            <div class="filter-group">
+                                <label>Building Type</label>
+                                <select id="campaign-filter-bldgtype">
+                                    <option value="">All</option>
+                                    <option value="1">1 - One/Two Family</option>
+                                    <option value="2">2 - Multiple Dwelling</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label>Residential</label>
+                                <select id="campaign-filter-residential">
+                                    <option value="">All</option>
+                                    <option value="YES">Residential Only</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Preview Count -->
+                    <div class="campaign-preview-count" id="campaign-preview-count">
+                        <i class="fas fa-users"></i>
+                        <span>Select filters to see matching contacts...</span>
+                    </div>
+                    
+                    <!-- Overlap Warning -->
+                    <div class="campaign-overlap-warning" id="campaign-overlap-warning" style="display: none;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span id="campaign-overlap-text"></span>
+                        <div class="overlap-actions">
+                            <button class="btn btn-sm btn-secondary" id="campaign-exclude-overlap">Exclude them</button>
+                            <button class="btn btn-sm btn-primary" id="campaign-include-overlap">Include anyway</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Step 3: Message Sequence -->
+                <div class="wizard-content" id="campaign-step-3" style="display: none;">
+                    <div class="campaign-messages-header">
+                        <h4>Message Sequence</h4>
+                        <button class="btn btn-sm btn-primary" id="add-campaign-message-btn">
+                            <i class="fas fa-plus"></i> Add Message
+                        </button>
+                    </div>
+                    <div class="campaign-messages-list" id="campaign-messages-list">
+                        <!-- Messages added dynamically -->
+                        <div class="no-messages-hint">
+                            <i class="fas fa-envelope-open-text"></i>
+                            <p>No messages yet. Click "Add Message" to start building your campaign sequence.</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Step 4: Review -->
+                <div class="wizard-content" id="campaign-step-4" style="display: none;">
+                    <h4>Review Campaign</h4>
+                    <div class="campaign-review" id="campaign-review">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="campaign-wizard-back" style="display: none;">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="campaign-wizard-next">
+                    Next <i class="fas fa-arrow-right"></i>
+                </button>
+                <button class="btn btn-success" id="campaign-wizard-save" style="display: none;">
+                    <i class="fas fa-rocket"></i> Create Campaign
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Campaign Message Edit Modal -->
+    <div class="modal" id="campaign-message-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="campaign-message-modal-title">Add Message</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="campaign-message-edit-id">
+                <input type="hidden" id="campaign-message-sequence">
+                
+                <div class="form-group">
+                    <label for="campaign-message-body">Message Text *</label>
+                    <textarea id="campaign-message-body" rows="4" placeholder="Hi {name}, we noticed you have a permit in {borough}..." required></textarea>
+                    <div class="template-vars-hint">
+                        <span>Variables: </span>
+                        <button type="button" class="btn-var" onclick="insertCampaignVar('{name}')">{name}</button>
+                        <button type="button" class="btn-var" onclick="insertCampaignVar('{company}')">{company}</button>
+                        <button type="button" class="btn-var" onclick="insertCampaignVar('{date}')">{date}</button>
+                        <button type="button" class="btn-var" onclick="insertCampaignVar('{time}')">{time}</button>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="campaign-message-days">Days After Previous Message</label>
+                    <input type="number" id="campaign-message-days" min="0" value="0">
+                    <small class="text-muted">0 = Send immediately (for first message)</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="campaign-message-time">Send Time (optional)</label>
+                    <input type="time" id="campaign-message-time" placeholder="Leave blank to use campaign default">
+                    <small class="text-muted">Override campaign default send time for this message</small>
+                </div>
+                
+                <div class="form-group followup-section">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="campaign-message-followup">
+                        <strong>Enable Follow-up</strong>
+                        <span class="tooltip-trigger" data-tooltip="If the contact doesn't respond, automatically send a follow-up message after the specified days.">ⓘ</span>
+                    </label>
+                    
+                    <div class="followup-options" id="followup-options" style="display: none;">
+                        <div class="form-group">
+                            <label for="campaign-followup-days">Follow up after (days)</label>
+                            <input type="number" id="campaign-followup-days" min="1" value="3">
+                        </div>
+                        <div class="form-group">
+                            <label for="campaign-followup-body">Follow-up Message</label>
+                            <textarea id="campaign-followup-body" rows="2" placeholder="Just following up on my last message. Let me know if you have any questions!"></textarea>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group ab-test-section">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="campaign-message-abtest">
+                        <strong>A/B Test This Message</strong>
+                        <span class="tooltip-trigger" data-tooltip="Split recipients 50/50 and send different message versions. Track which performs better.">ⓘ</span>
+                    </label>
+                    
+                    <div class="abtest-options" id="abtest-options" style="display: none;">
+                        <div class="form-group">
+                            <label>Variant A (Original message above)</label>
+                        </div>
+                        <div class="form-group">
+                            <label for="campaign-abtest-variant-b">Variant B</label>
+                            <textarea id="campaign-abtest-variant-b" rows="3" placeholder="Alternative message text for 50% of recipients..."></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="save-campaign-message-btn">Save Message</button>
             </div>
         </div>
     </div>

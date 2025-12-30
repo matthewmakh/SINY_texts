@@ -202,6 +202,345 @@ class ContactNote(Base):
         }
 
 
+# =============================================================================
+# CAMPAIGN TABLES
+# =============================================================================
+
+class CampaignStatus(enum.Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+
+
+class EnrollmentStatus(enum.Enum):
+    ACTIVE = "active"
+    ENGAGED = "engaged"  # Has responded at least once
+    COMPLETED = "completed"  # Received all messages
+    OPTED_OUT = "opted_out"  # Said STOP or similar
+
+
+class Campaign(Base):
+    """
+    A campaign is a sequence of scheduled messages sent to a group of contacts.
+    Supports both snapshot (fixed list) and dynamic (re-filter each time) enrollment.
+    """
+    __tablename__ = 'campaigns'
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(20), default=CampaignStatus.DRAFT.value)
+    
+    # Enrollment type: 'snapshot' locks contacts at start, 'dynamic' re-filters before each message
+    enrollment_type = Column(String(20), default='snapshot')
+    
+    # JSON storing filter criteria used to select contacts
+    # e.g., {"borough": "BROOKLYN", "role": "Owner", "job_type": "NB"}
+    filter_criteria = Column(Text, nullable=True)
+    
+    # Default time of day to send messages (EST)
+    default_send_time = Column(String(10), default='11:00')  # HH:MM format
+    
+    # Tracking
+    created_by = Column(Integer, nullable=True)  # User ID
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    paused_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # Response tracking window (30 days after completion)
+    response_tracking_ends_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    messages = relationship("CampaignMessage", back_populates="campaign", order_by="CampaignMessage.sequence_order")
+    enrollments = relationship("CampaignEnrollment", back_populates="campaign")
+    
+    def to_dict(self, include_stats=False):
+        import json
+        result = {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'status': self.status,
+            'enrollment_type': self.enrollment_type,
+            'filter_criteria': json.loads(self.filter_criteria) if self.filter_criteria else {},
+            'default_send_time': self.default_send_time,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'paused_at': self.paused_at.isoformat() if self.paused_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'message_count': len(self.messages) if self.messages else 0
+        }
+        if include_stats:
+            result['stats'] = self.get_stats()
+        return result
+    
+    def get_stats(self):
+        """Calculate campaign statistics"""
+        total_enrolled = len(self.enrollments) if self.enrollments else 0
+        engaged = sum(1 for e in self.enrollments if e.status == EnrollmentStatus.ENGAGED.value or e.first_response_at) if self.enrollments else 0
+        opted_out = sum(1 for e in self.enrollments if e.status == EnrollmentStatus.OPTED_OUT.value) if self.enrollments else 0
+        completed = sum(1 for e in self.enrollments if e.status == EnrollmentStatus.COMPLETED.value) if self.enrollments else 0
+        
+        return {
+            'total_enrolled': total_enrolled,
+            'engaged': engaged,
+            'engaged_rate': round((engaged / total_enrolled * 100), 1) if total_enrolled > 0 else 0,
+            'opted_out': opted_out,
+            'completed': completed
+        }
+
+
+class CampaignMessage(Base):
+    """
+    A single message in a campaign sequence.
+    Each message can have its own timing, follow-up settings, and A/B test variants.
+    """
+    __tablename__ = 'campaign_messages'
+    
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey('campaigns.id'), nullable=False)
+    
+    # Position in the sequence (1, 2, 3, ...)
+    sequence_order = Column(Integer, nullable=False)
+    
+    # Message content (supports template variables: {name}, {company}, {address}, etc.)
+    message_body = Column(Text, nullable=False)
+    
+    # Timing: days to wait after previous message (0 for first message = send immediately on start)
+    days_after_previous = Column(Integer, default=0)
+    
+    # Optional: override campaign's default send time for this message
+    send_time = Column(String(10), nullable=True)  # HH:MM format, NULL = use campaign default
+    
+    # Follow-up settings
+    enable_followup = Column(Boolean, default=False)
+    followup_days = Column(Integer, default=3)  # Days to wait before follow-up
+    followup_body = Column(Text, default="Just following up on my last message. Let me know if you have any questions!")
+    
+    # A/B Testing
+    has_ab_test = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    campaign = relationship("Campaign", back_populates="messages")
+    ab_test = relationship("CampaignABTest", back_populates="campaign_message", uselist=False)
+    sends = relationship("CampaignSend", back_populates="campaign_message")
+    
+    def to_dict(self, include_stats=False):
+        result = {
+            'id': self.id,
+            'campaign_id': self.campaign_id,
+            'sequence_order': self.sequence_order,
+            'message_body': self.message_body,
+            'days_after_previous': self.days_after_previous,
+            'send_time': self.send_time,
+            'enable_followup': self.enable_followup,
+            'followup_days': self.followup_days,
+            'followup_body': self.followup_body,
+            'has_ab_test': self.has_ab_test,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+        if self.ab_test:
+            result['ab_test'] = self.ab_test.to_dict()
+        if include_stats:
+            result['stats'] = self.get_stats()
+        return result
+    
+    def get_stats(self):
+        """Calculate message-level statistics"""
+        if not self.sends:
+            return {'sent': 0, 'delivered': 0, 'responses': 0, 'followups_sent': 0}
+        
+        scheduled_sends = [s for s in self.sends if s.message_type == 'scheduled']
+        followup_sends = [s for s in self.sends if s.message_type == 'followup']
+        
+        return {
+            'sent': len(scheduled_sends),
+            'delivered': sum(1 for s in scheduled_sends if s.status in ['delivered', 'sent']),
+            'responses': sum(1 for s in scheduled_sends if s.response_received),
+            'followups_sent': len(followup_sends),
+            'followup_responses': sum(1 for s in followup_sends if s.response_received)
+        }
+
+
+class CampaignABTest(Base):
+    """
+    A/B test configuration for a campaign message.
+    Contacts are randomly split 50/50 between variant A and B.
+    """
+    __tablename__ = 'campaign_ab_tests'
+    
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey('campaigns.id'), nullable=False)
+    campaign_message_id = Column(Integer, ForeignKey('campaign_messages.id'), nullable=False, unique=True)
+    
+    # Variant A is the original message_body from campaign_message
+    # Variant B is stored here
+    variant_b_body = Column(Text, nullable=False)
+    
+    # Tracking (auto-calculated from sends, but cached for performance)
+    variant_a_sent = Column(Integer, default=0)
+    variant_b_sent = Column(Integer, default=0)
+    variant_a_responses = Column(Integer, default=0)
+    variant_b_responses = Column(Integer, default=0)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    campaign_message = relationship("CampaignMessage", back_populates="ab_test")
+    
+    def to_dict(self):
+        a_rate = round((self.variant_a_responses / self.variant_a_sent * 100), 1) if self.variant_a_sent > 0 else 0
+        b_rate = round((self.variant_b_responses / self.variant_b_sent * 100), 1) if self.variant_b_sent > 0 else 0
+        
+        return {
+            'id': self.id,
+            'campaign_message_id': self.campaign_message_id,
+            'variant_b_body': self.variant_b_body,
+            'variant_a_sent': self.variant_a_sent,
+            'variant_b_sent': self.variant_b_sent,
+            'variant_a_responses': self.variant_a_responses,
+            'variant_b_responses': self.variant_b_responses,
+            'variant_a_response_rate': a_rate,
+            'variant_b_response_rate': b_rate,
+            'winner': 'A' if a_rate > b_rate else ('B' if b_rate > a_rate else 'tie')
+        }
+
+
+class CampaignEnrollment(Base):
+    """
+    Tracks each contact's enrollment and progress through a campaign.
+    """
+    __tablename__ = 'campaign_enrollments'
+    
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey('campaigns.id'), nullable=False)
+    
+    # Contact info (snapshot at enrollment time)
+    phone_number = Column(String(20), nullable=False, index=True)
+    contact_name = Column(String(255), nullable=True)
+    contact_company = Column(String(255), nullable=True)
+    
+    # A/B test assignment (if campaign has A/B tests)
+    ab_variant = Column(String(1), nullable=True)  # 'A' or 'B'
+    
+    # Progress tracking
+    current_step = Column(Integer, default=0)  # Which message they're on (0 = not started yet)
+    status = Column(String(20), default=EnrollmentStatus.ACTIVE.value)
+    
+    # Timestamps
+    enrolled_at = Column(DateTime, default=datetime.utcnow)
+    last_message_at = Column(DateTime, nullable=True)
+    last_message_id = Column(Integer, nullable=True)  # campaign_message_id
+    
+    # Response tracking
+    first_response_at = Column(DateTime, nullable=True)
+    first_response_message_id = Column(Integer, nullable=True)  # Which message they first responded to
+    response_count = Column(Integer, default=0)
+    
+    # Opt-out tracking (for display purposes - Twilio handles actual blocking)
+    opted_out_at = Column(DateTime, nullable=True)
+    opted_out_keyword = Column(String(50), nullable=True)  # What they said: "STOP", "stop", etc.
+    
+    # Unique constraint: one enrollment per phone per campaign
+    __table_args__ = (
+        # UniqueConstraint('campaign_id', 'phone_number', name='unique_campaign_enrollment'),
+    )
+    
+    # Relationships
+    campaign = relationship("Campaign", back_populates="enrollments")
+    sends = relationship("CampaignSend", back_populates="enrollment")
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'campaign_id': self.campaign_id,
+            'phone_number': self.phone_number,
+            'contact_name': self.contact_name,
+            'contact_company': self.contact_company,
+            'ab_variant': self.ab_variant,
+            'current_step': self.current_step,
+            'status': self.status,
+            'enrolled_at': self.enrolled_at.isoformat() if self.enrolled_at else None,
+            'last_message_at': self.last_message_at.isoformat() if self.last_message_at else None,
+            'last_message_id': self.last_message_id,
+            'first_response_at': self.first_response_at.isoformat() if self.first_response_at else None,
+            'first_response_message_id': self.first_response_message_id,
+            'response_count': self.response_count,
+            'opted_out_at': self.opted_out_at.isoformat() if self.opted_out_at else None,
+            'opted_out_keyword': self.opted_out_keyword
+        }
+
+
+class CampaignSend(Base):
+    """
+    Log of every message sent as part of a campaign.
+    Provides audit trail and enables detailed analytics.
+    """
+    __tablename__ = 'campaign_sends'
+    
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey('campaigns.id'), nullable=False, index=True)
+    campaign_message_id = Column(Integer, ForeignKey('campaign_messages.id'), nullable=False)
+    enrollment_id = Column(Integer, ForeignKey('campaign_enrollments.id'), nullable=False)
+    
+    phone_number = Column(String(20), nullable=False, index=True)
+    
+    # Type: 'scheduled' for main message, 'followup' for follow-up
+    message_type = Column(String(20), nullable=False)
+    
+    # Actual message sent (after variable substitution)
+    message_body = Column(Text, nullable=False)
+    
+    # A/B variant used (if applicable)
+    ab_variant = Column(String(1), nullable=True)
+    
+    # Twilio tracking
+    twilio_sid = Column(String(50), nullable=True, index=True)
+    status = Column(String(20), default='pending')  # pending, queued, sent, delivered, failed
+    error_message = Column(Text, nullable=True)
+    
+    # Timing
+    scheduled_for = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    
+    # Response tracking
+    response_received = Column(Boolean, default=False)
+    response_at = Column(DateTime, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    campaign_message = relationship("CampaignMessage", back_populates="sends")
+    enrollment = relationship("CampaignEnrollment", back_populates="sends")
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'campaign_id': self.campaign_id,
+            'campaign_message_id': self.campaign_message_id,
+            'enrollment_id': self.enrollment_id,
+            'phone_number': self.phone_number,
+            'message_type': self.message_type,
+            'message_body': self.message_body,
+            'ab_variant': self.ab_variant,
+            'twilio_sid': self.twilio_sid,
+            'status': self.status,
+            'error_message': self.error_message,
+            'scheduled_for': self.scheduled_for.isoformat() if self.scheduled_for else None,
+            'sent_at': self.sent_at.isoformat() if self.sent_at else None,
+            'response_received': self.response_received,
+            'response_at': self.response_at.isoformat() if self.response_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
 def init_db():
     """Initialize the database tables"""
     try:
@@ -227,7 +566,10 @@ def _run_migrations():
         ("scheduled_bulk_messages", "recurrence_end_date", "TIMESTAMP"),
         ("scheduled_bulk_messages", "last_sent_at", "TIMESTAMP"),
         ("scheduled_bulk_messages", "send_count", "INTEGER DEFAULT 0"),
-        # Add contact_notes table columns if needed
+        # Campaign table columns (in case table exists but missing columns)
+        ("campaigns", "response_tracking_ends_at", "TIMESTAMP"),
+        ("campaign_enrollments", "response_count", "INTEGER DEFAULT 0"),
+        ("campaign_enrollments", "opted_out_keyword", "VARCHAR(50)"),
     ]
     
     with engine.connect() as conn:
