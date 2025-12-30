@@ -1244,7 +1244,8 @@ def enroll_contacts(campaign_id):
             campaign_id=campaign_id,
             contacts=data.get('contacts'),
             use_filters=data.get('use_filters', False),
-            exclude_phones=data.get('exclude_phones')
+            exclude_phones=data.get('exclude_phones'),
+            manual_contacts=data.get('manual_contacts')
         )
         
         return jsonify({'success': True, 'enrolled_count': count})

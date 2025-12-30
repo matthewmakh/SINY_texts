@@ -890,16 +890,43 @@
                             <button type="button" class="btn btn-sm btn-secondary" id="campaign-clear-filters" style="width: 100%; margin-top: 8px;">
                                 <i class="fas fa-times"></i> Clear All Filters
                             </button>
+                            
+                            <!-- Manual Contact Add Section -->
+                            <div class="manual-add-section">
+                                <h5><i class="fas fa-user-plus"></i> Add Specific Contacts</h5>
+                                <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 8px;">Add contacts that don't match filters</p>
+                                <div class="manual-add-search">
+                                    <input type="text" id="campaign-manual-search" placeholder="Search by name or phone...">
+                                    <button type="button" class="btn btn-sm btn-primary" id="campaign-manual-search-btn">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                </div>
+                                <div class="manual-search-results" id="manual-search-results" style="display: none;"></div>
+                                <div class="manual-added-contacts" id="manual-added-contacts"></div>
+                            </div>
                         </div>
                         
                         <!-- Right: Contact Preview -->
                         <div class="campaign-contacts-preview">
                             <div class="contacts-preview-header">
-                                <h4><i class="fas fa-users"></i> Matching Contacts</h4>
+                                <h4><i class="fas fa-users"></i> Campaign Contacts</h4>
                                 <div class="campaign-preview-count" id="campaign-preview-count">
                                     <span class="preview-count-number" id="preview-count-number">0</span>
-                                    <span class="preview-count-label">contacts</span>
+                                    <span class="preview-count-label">total</span>
                                 </div>
+                            </div>
+                            
+                            <!-- Manually Added Contacts (if any) -->
+                            <div class="manual-contacts-section" id="manual-contacts-section" style="display: none;">
+                                <div class="manual-contacts-header">
+                                    <span><i class="fas fa-user-plus"></i> Manually Added (<span id="manual-count">0</span>)</span>
+                                </div>
+                                <div class="manual-contacts-list" id="manual-contacts-list"></div>
+                            </div>
+                            
+                            <!-- Filtered Contacts Header -->
+                            <div class="filtered-contacts-header" id="filtered-contacts-header">
+                                <span><i class="fas fa-filter"></i> From Filters (<span id="filtered-count">0</span>)</span>
                             </div>
                             
                             <!-- Overlap Warning -->
@@ -920,7 +947,7 @@
                             </div>
                             
                             <div class="contacts-preview-footer" id="contacts-preview-footer" style="display: none;">
-                                <span class="text-muted">Showing first 50 of <span id="total-contacts-count">0</span> contacts</span>
+                                <span class="text-muted">Showing first 50 of <span id="total-contacts-count">0</span> filtered contacts</span>
                             </div>
                         </div>
                     </div>

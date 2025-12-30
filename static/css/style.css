@@ -1940,6 +1940,178 @@ body {
     background: #fef2f2;
 }
 
+/* Manual Contact Add Section */
+.manual-add-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.manual-add-section h5 {
+    font-size: 0.9rem;
+    margin: 0 0 4px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.manual-add-section h5 i {
+    color: var(--primary-color);
+}
+
+.manual-add-search {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.manual-add-search input {
+    flex: 1;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+}
+
+.manual-add-search .btn {
+    padding: 8px 12px;
+}
+
+.manual-search-results {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 8px;
+}
+
+.manual-search-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.manual-search-item:last-child {
+    border-bottom: none;
+}
+
+.manual-search-item:hover {
+    background: #f0f9ff;
+}
+
+.manual-search-item .contact-preview-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 0.7rem;
+}
+
+.manual-search-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.manual-search-item-name {
+    font-weight: 500;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.manual-search-item-phone {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.manual-search-item .add-btn {
+    color: var(--primary-color);
+    font-size: 1rem;
+}
+
+.manual-added-contacts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.manual-added-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px 4px 10px;
+    background: #dbeafe;
+    color: #1e40af;
+    border-radius: 16px;
+    font-size: 0.8rem;
+}
+
+.manual-added-chip .remove-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #1e40af;
+    padding: 0;
+    font-size: 0.9rem;
+    opacity: 0.7;
+}
+
+.manual-added-chip .remove-btn:hover {
+    opacity: 1;
+}
+
+/* Manual Contacts in Preview */
+.manual-contacts-section {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.manual-contacts-header,
+.filtered-contacts-header {
+    padding: 8px 16px;
+    background: #f1f5f9;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.manual-contacts-header i,
+.filtered-contacts-header i {
+    margin-right: 6px;
+}
+
+.manual-contacts-list {
+    padding: 4px 8px;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.manual-contacts-list .contact-preview-item {
+    background: #f0f9ff;
+    border: 1px solid #bfdbfe;
+    margin-bottom: 4px;
+}
+
+.manual-contacts-list .contact-preview-item:last-child {
+    margin-bottom: 0;
+}
+
+.contact-remove-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 4px;
+    font-size: 0.9rem;
+}
+
+.contact-remove-btn:hover {
+    color: var(--danger-color);
+}
+
 
 /* ============ Campaigns ============ */
 

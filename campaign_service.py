@@ -348,13 +348,15 @@ class CampaignService:
         campaign_id: int, 
         contacts: List[dict] = None,
         use_filters: bool = False,
-        exclude_phones: List[str] = None
+        exclude_phones: List[str] = None,
+        manual_contacts: List[dict] = None
     ) -> int:
         """
         Enroll contacts in a campaign.
         
         For snapshot: Pass contacts list directly
         For dynamic: Set use_filters=True to use campaign's filter_criteria
+        manual_contacts: Additional contacts to add regardless of filters
         """
         session = get_session()
         try:
@@ -363,11 +365,21 @@ class CampaignService:
                 raise ValueError("Campaign not found")
             
             # Get contacts to enroll
+            all_contacts = []
+            
             if use_filters and campaign.filter_criteria:
                 filter_criteria = json.loads(campaign.filter_criteria)
-                contacts = get_all_contacts(mobile_only=True, **filter_criteria)
+                filtered = get_all_contacts(mobile_only=True, **filter_criteria)
+                if filtered:
+                    all_contacts.extend(filtered)
+            elif contacts:
+                all_contacts.extend(contacts)
             
-            if not contacts:
+            # Add manual contacts
+            if manual_contacts:
+                all_contacts.extend(manual_contacts)
+            
+            if not all_contacts:
                 return 0
             
             exclude_phones = set(exclude_phones or [])
@@ -379,11 +391,12 @@ class CampaignService:
             ).count() > 0
             
             enrolled_count = 0
+            enrolled_phones = set()  # Track to avoid duplicates from filters + manual
             
-            for contact in contacts:
+            for contact in all_contacts:
                 phone = normalize_phone(contact.get('phone') or contact.get('phone_number') or contact.get('phone_normalized'))
                 
-                if not phone or phone in exclude_phones:
+                if not phone or phone in exclude_phones or phone in enrolled_phones:
                     continue
                 
                 # Check if already enrolled
@@ -407,6 +420,7 @@ class CampaignService:
                     status=EnrollmentStatus.ACTIVE.value
                 )
                 session.add(enrollment)
+                enrolled_phones.add(phone)
                 enrolled_count += 1
             
             session.commit()

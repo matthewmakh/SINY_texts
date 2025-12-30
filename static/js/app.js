@@ -2039,6 +2039,7 @@ let campaignState = {
     },
     previewContacts: [],
     previewCount: 0,
+    manualContacts: [],  // Manually added contacts
     overlappingPhones: [],
     excludeOverlap: false,
     editingCampaignId: null
@@ -2381,6 +2382,7 @@ function openCampaignWizard() {
         },
         previewContacts: [],
         previewCount: 0,
+        manualContacts: [],
         overlappingPhones: [],
         excludeOverlap: false,
         editingCampaignId: null
@@ -2393,11 +2395,24 @@ function openCampaignWizard() {
     document.querySelector('input[name="enrollment-type"][value="snapshot"]').checked = true;
     
     // Reset filters
+    document.getElementById('campaign-filter-search').value = '';
     document.getElementById('campaign-filter-borough').value = '';
     document.getElementById('campaign-filter-role').value = '';
     document.getElementById('campaign-filter-jobtype').value = '';
-    document.getElementById('campaign-filter-bldgtype').value = '';
-    document.getElementById('campaign-filter-residential').value = '';
+    
+    // Reset advanced filters
+    const advancedFilters = ['campaign-filter-bldgtype', 'campaign-filter-residential', 
+                            'campaign-filter-worktype', 'campaign-filter-status', 'campaign-filter-zip'];
+    advancedFilters.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    
+    // Reset manual contacts
+    document.getElementById('campaign-manual-search').value = '';
+    document.getElementById('manual-search-results').style.display = 'none';
+    document.getElementById('manual-added-contacts').innerHTML = '';
+    document.getElementById('manual-contacts-section').style.display = 'none';
     
     // Reset messages
     document.getElementById('campaign-messages-list').innerHTML = `
@@ -2458,9 +2473,10 @@ function wizardNext() {
     }
     
     if (campaignState.currentStep === 2) {
-        // Validate step 2
-        if (campaignState.previewCount === 0) {
-            showToast('No contacts match your filters', 'error');
+        // Validate step 2 - need either filtered contacts or manual contacts
+        const totalContacts = campaignState.previewCount + campaignState.manualContacts.length;
+        if (totalContacts === 0) {
+            showToast('No contacts selected. Use filters or add contacts manually.', 'error');
             return;
         }
         // Save filter criteria
@@ -2520,6 +2536,7 @@ async function updateCampaignPreview() {
 async function doUpdateCampaignPreview() {
     const filters = getCampaignFilters();
     const countEl = document.getElementById('preview-count-number');
+    const filteredCountEl = document.getElementById('filtered-count');
     const listEl = document.getElementById('contacts-preview-list');
     const footerEl = document.getElementById('contacts-preview-footer');
     
@@ -2533,8 +2550,12 @@ async function doUpdateCampaignPreview() {
             campaignState.previewCount = result.count;
             campaignState.previewContacts = result.sample;
             
-            // Update count
-            if (countEl) countEl.textContent = result.count.toLocaleString();
+            // Update total count (filtered + manual)
+            const totalCount = result.count + campaignState.manualContacts.length;
+            if (countEl) countEl.textContent = totalCount.toLocaleString();
+            
+            // Update filtered count
+            if (filteredCountEl) filteredCountEl.textContent = result.count.toLocaleString();
             
             // Update contacts list
             renderContactsPreview(result.sample, result.count);
@@ -2614,6 +2635,136 @@ function clearCampaignFilters() {
     });
     
     updateCampaignPreview();
+}
+
+// Manual Contact Search and Add
+async function searchManualContacts() {
+    const searchTerm = document.getElementById('campaign-manual-search').value.trim();
+    const resultsEl = document.getElementById('manual-search-results');
+    
+    if (!searchTerm || searchTerm.length < 2) {
+        resultsEl.style.display = 'none';
+        return;
+    }
+    
+    resultsEl.innerHTML = '<div style="padding: 12px; text-align: center;"><i class="fas fa-spinner fa-spin"></i></div>';
+    resultsEl.style.display = 'block';
+    
+    try {
+        const result = await API.get(`/contacts?search=${encodeURIComponent(searchTerm)}&limit=10`);
+        if (result.success && result.contacts && result.contacts.length > 0) {
+            // Filter out contacts already added manually
+            const addedPhones = new Set(campaignState.manualContacts.map(c => c.phone || c.phone_normalized));
+            const filteredResults = result.contacts.filter(c => !addedPhones.has(c.phone) && !addedPhones.has(c.phone_normalized));
+            
+            if (filteredResults.length === 0) {
+                resultsEl.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted);">All matching contacts already added</div>';
+            } else {
+                resultsEl.innerHTML = filteredResults.map(contact => {
+                    const name = contact.name || contact.owner_name || 'Unknown';
+                    const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+                    const phone = contact.phone_normalized || contact.phone || '';
+                    
+                    return `
+                        <div class="manual-search-item" onclick="addManualContact(${JSON.stringify(contact).replace(/"/g, '&quot;')})">
+                            <div class="contact-preview-avatar">${initials}</div>
+                            <div class="manual-search-item-info">
+                                <div class="manual-search-item-name">${escapeHtml(name)}</div>
+                                <div class="manual-search-item-phone">${escapeHtml(phone)}</div>
+                            </div>
+                            <i class="fas fa-plus-circle add-btn"></i>
+                        </div>
+                    `;
+                }).join('');
+            }
+        } else {
+            resultsEl.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted);">No contacts found</div>';
+        }
+    } catch (e) {
+        resultsEl.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--danger-color);">Error searching</div>';
+    }
+}
+
+function addManualContact(contact) {
+    // Avoid duplicates
+    const phone = contact.phone || contact.phone_normalized;
+    if (campaignState.manualContacts.some(c => (c.phone || c.phone_normalized) === phone)) {
+        showToast('Contact already added', 'error');
+        return;
+    }
+    
+    campaignState.manualContacts.push(contact);
+    renderManualContacts();
+    updateTotalContactCount();
+    
+    // Clear search
+    document.getElementById('campaign-manual-search').value = '';
+    document.getElementById('manual-search-results').style.display = 'none';
+    
+    showToast('Contact added', 'success');
+}
+
+function removeManualContact(phone) {
+    campaignState.manualContacts = campaignState.manualContacts.filter(c => 
+        (c.phone || c.phone_normalized) !== phone
+    );
+    renderManualContacts();
+    updateTotalContactCount();
+}
+
+function renderManualContacts() {
+    const chipsEl = document.getElementById('manual-added-contacts');
+    const sectionEl = document.getElementById('manual-contacts-section');
+    const listEl = document.getElementById('manual-contacts-list');
+    const manualCountEl = document.getElementById('manual-count');
+    
+    if (campaignState.manualContacts.length === 0) {
+        chipsEl.innerHTML = '';
+        sectionEl.style.display = 'none';
+        return;
+    }
+    
+    // Update chips in filter panel
+    chipsEl.innerHTML = campaignState.manualContacts.map(contact => {
+        const name = contact.name || contact.owner_name || 'Unknown';
+        const phone = contact.phone || contact.phone_normalized;
+        return `
+            <span class="manual-added-chip">
+                ${escapeHtml(name.split(' ')[0])}
+                <button class="remove-btn" onclick="removeManualContact('${phone}')">&times;</button>
+            </span>
+        `;
+    }).join('');
+    
+    // Update preview section
+    sectionEl.style.display = 'block';
+    manualCountEl.textContent = campaignState.manualContacts.length;
+    
+    listEl.innerHTML = campaignState.manualContacts.map(contact => {
+        const name = contact.name || contact.owner_name || 'Unknown';
+        const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+        const phone = contact.phone_normalized || contact.phone || '';
+        const borough = contact.borough || '';
+        
+        return `
+            <div class="contact-preview-item">
+                <div class="contact-preview-avatar">${initials}</div>
+                <div class="contact-preview-info">
+                    <div class="contact-preview-name">${escapeHtml(name)}</div>
+                    <div class="contact-preview-details">${escapeHtml(phone)}${borough ? ' • ' + borough : ''}</div>
+                </div>
+                <button class="contact-remove-btn" onclick="removeManualContact('${phone}')" title="Remove">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+    }).join('');
+}
+
+function updateTotalContactCount() {
+    const totalCount = campaignState.previewCount + campaignState.manualContacts.length;
+    const countEl = document.getElementById('preview-count-number');
+    if (countEl) countEl.textContent = totalCount.toLocaleString();
 }
 
 async function checkCampaignOverlap(phones) {
@@ -2865,10 +3016,17 @@ async function saveCampaign() {
         }
         
         // 3. Enroll contacts
-        const enrollResult = await API.post(`/campaigns/${campaignId}/enroll`, {
+        const enrollData = {
             use_filters: true,
-            exclude_phones: campaignState.excludeOverlap ? campaignState.overlappingPhones : []
-        });
+            exclude_phones: campaignState.excludeOverlap ? campaignState.overlappingPhones : [],
+            manual_contacts: campaignState.manualContacts.map(c => ({
+                phone: c.phone || c.phone_normalized,
+                name: c.name || c.owner_name || 'Unknown',
+                borough: c.borough || '',
+                role: c.role || ''
+            }))
+        };
+        const enrollResult = await API.post(`/campaigns/${campaignId}/enroll`, enrollData);
         
         showToast(`Campaign created with ${enrollResult.enrolled_count || 0} contacts enrolled!`, 'success');
         hideModal('campaign-modal');
@@ -2925,6 +3083,20 @@ function initCampaignEventListeners() {
     
     // Clear filters button
     document.getElementById('campaign-clear-filters')?.addEventListener('click', clearCampaignFilters);
+    
+    // Manual contact search
+    document.getElementById('campaign-manual-search-btn')?.addEventListener('click', searchManualContacts);
+    document.getElementById('campaign-manual-search')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') searchManualContacts();
+    });
+    // Hide search results when clicking outside
+    document.addEventListener('click', (e) => {
+        const resultsEl = document.getElementById('manual-search-results');
+        const searchArea = document.querySelector('.manual-search-input-wrapper');
+        if (resultsEl && searchArea && !searchArea.contains(e.target)) {
+            resultsEl.style.display = 'none';
+        }
+    });
     
     // Overlap handling
     document.getElementById('campaign-exclude-overlap')?.addEventListener('click', () => {
