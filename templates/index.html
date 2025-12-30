@@ -786,9 +786,21 @@
                 
                 <!-- Step 2: Contact Selection -->
                 <div class="wizard-content" id="campaign-step-2" style="display: none;">
-                    <h4>Select Contacts Using Filters</h4>
-                    <div class="campaign-filters">
-                        <div class="filter-row">
+                    <div class="campaign-contacts-layout">
+                        <!-- Left: Filters -->
+                        <div class="campaign-filters-panel">
+                            <h4><i class="fas fa-filter"></i> Filter Contacts</h4>
+                            
+                            <!-- Search -->
+                            <div class="filter-group">
+                                <label>Search</label>
+                                <div class="filter-search-input">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" id="campaign-filter-search" placeholder="Name, company, phone...">
+                                </div>
+                            </div>
+                            
+                            <!-- Basic Filters -->
                             <div class="filter-group">
                                 <label>Borough</label>
                                 <select id="campaign-filter-borough">
@@ -800,6 +812,7 @@
                                     <option value="STATEN ISLAND">Staten Island</option>
                                 </select>
                             </div>
+                            
                             <div class="filter-group">
                                 <label>Role</label>
                                 <select id="campaign-filter-role">
@@ -808,6 +821,7 @@
                                     <option value="Permittee">Permittee</option>
                                 </select>
                             </div>
+                            
                             <div class="filter-group">
                                 <label>Job Type</label>
                                 <select id="campaign-filter-jobtype">
@@ -819,39 +833,95 @@
                                     <option value="DM">DM - Demolition</option>
                                 </select>
                             </div>
-                        </div>
-                        <div class="filter-row">
-                            <div class="filter-group">
-                                <label>Building Type</label>
-                                <select id="campaign-filter-bldgtype">
-                                    <option value="">All</option>
-                                    <option value="1">1 - One/Two Family</option>
-                                    <option value="2">2 - Multiple Dwelling</option>
-                                </select>
+                            
+                            <!-- Advanced Filters Toggle -->
+                            <button type="button" class="btn btn-sm btn-outline" id="campaign-advanced-toggle" style="width: 100%; margin: 8px 0;">
+                                <i class="fas fa-sliders-h"></i> Advanced Filters
+                            </button>
+                            
+                            <!-- Advanced Filters -->
+                            <div class="campaign-advanced-filters" id="campaign-advanced-filters" style="display: none;">
+                                <div class="filter-group">
+                                    <label>Building Type</label>
+                                    <select id="campaign-filter-bldgtype">
+                                        <option value="">All</option>
+                                        <option value="1">1 - One/Two Family</option>
+                                        <option value="2">2 - Multiple Dwelling</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="filter-group">
+                                    <label>Residential</label>
+                                    <select id="campaign-filter-residential">
+                                        <option value="">All</option>
+                                        <option value="YES">Residential Only</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="filter-group">
+                                    <label>Work Type</label>
+                                    <select id="campaign-filter-worktype">
+                                        <option value="">All Work Types</option>
+                                        <option value="OT">OT - Other</option>
+                                        <option value="PL">PL - Plumbing</option>
+                                        <option value="EQ">EQ - Equipment</option>
+                                        <option value="MH">MH - Mechanical</option>
+                                        <option value="SP">SP - Sprinkler</option>
+                                        <option value="FP">FP - Fire Protection</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="filter-group">
+                                    <label>Permit Status</label>
+                                    <select id="campaign-filter-status">
+                                        <option value="">All Statuses</option>
+                                        <option value="ISSUED">Issued</option>
+                                        <option value="RE-ISSUED">Re-Issued</option>
+                                        <option value="IN PROCESS">In Process</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="filter-group">
+                                    <label>Zip Code</label>
+                                    <input type="text" id="campaign-filter-zip" placeholder="e.g., 11201">
+                                </div>
                             </div>
-                            <div class="filter-group">
-                                <label>Residential</label>
-                                <select id="campaign-filter-residential">
-                                    <option value="">All</option>
-                                    <option value="YES">Residential Only</option>
-                                </select>
-                            </div>
+                            
+                            <button type="button" class="btn btn-sm btn-secondary" id="campaign-clear-filters" style="width: 100%; margin-top: 8px;">
+                                <i class="fas fa-times"></i> Clear All Filters
+                            </button>
                         </div>
-                    </div>
-                    
-                    <!-- Preview Count -->
-                    <div class="campaign-preview-count" id="campaign-preview-count">
-                        <i class="fas fa-users"></i>
-                        <span>Select filters to see matching contacts...</span>
-                    </div>
-                    
-                    <!-- Overlap Warning -->
-                    <div class="campaign-overlap-warning" id="campaign-overlap-warning" style="display: none;">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        <span id="campaign-overlap-text"></span>
-                        <div class="overlap-actions">
-                            <button class="btn btn-sm btn-secondary" id="campaign-exclude-overlap">Exclude them</button>
-                            <button class="btn btn-sm btn-primary" id="campaign-include-overlap">Include anyway</button>
+                        
+                        <!-- Right: Contact Preview -->
+                        <div class="campaign-contacts-preview">
+                            <div class="contacts-preview-header">
+                                <h4><i class="fas fa-users"></i> Matching Contacts</h4>
+                                <div class="campaign-preview-count" id="campaign-preview-count">
+                                    <span class="preview-count-number" id="preview-count-number">0</span>
+                                    <span class="preview-count-label">contacts</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Overlap Warning -->
+                            <div class="campaign-overlap-warning" id="campaign-overlap-warning" style="display: none;">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <span id="campaign-overlap-text"></span>
+                                <div class="overlap-actions">
+                                    <button class="btn btn-sm btn-secondary" id="campaign-exclude-overlap">Exclude them</button>
+                                    <button class="btn btn-sm btn-primary" id="campaign-include-overlap">Include anyway</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Contact List Preview -->
+                            <div class="contacts-preview-list" id="contacts-preview-list">
+                                <div class="loading-spinner">
+                                    <i class="fas fa-spinner fa-spin"></i> Apply filters to see matching contacts...
+                                </div>
+                            </div>
+                            
+                            <div class="contacts-preview-footer" id="contacts-preview-footer" style="display: none;">
+                                <span class="text-muted">Showing first 50 of <span id="total-contacts-count">0</span> contacts</span>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -2291,7 +2291,199 @@ body {
     color: var(--primary-color);
 }
 
-/* Campaign Filters */
+/* Campaign Filters - Two Column Layout */
+.campaign-contacts-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 20px;
+    min-height: 400px;
+}
+
+.campaign-filters-panel {
+    background: #f8fafc;
+    padding: 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    overflow-y: auto;
+    max-height: 500px;
+}
+
+.campaign-filters-panel h4 {
+    margin: 0 0 16px 0;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.campaign-filters-panel h4 i {
+    color: var(--primary-color);
+}
+
+.filter-search-input {
+    position: relative;
+}
+
+.filter-search-input i {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+}
+
+.filter-search-input input {
+    width: 100%;
+    padding: 8px 12px 8px 32px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+}
+
+.campaign-advanced-filters {
+    border-top: 1px solid var(--border-color);
+    padding-top: 12px;
+    margin-top: 8px;
+}
+
+/* Campaign Contacts Preview */
+.campaign-contacts-preview {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+}
+
+.contacts-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+    background: #f8fafc;
+}
+
+.contacts-preview-header h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.contacts-preview-header h4 i {
+    color: var(--primary-color);
+}
+
+.campaign-preview-count {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #dbeafe;
+    padding: 6px 12px;
+    border-radius: 20px;
+    color: #1e40af;
+    font-weight: 600;
+}
+
+.preview-count-number {
+    font-size: 1.1rem;
+}
+
+.preview-count-label {
+    font-size: 0.85rem;
+    font-weight: 400;
+}
+
+.contacts-preview-list {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 350px;
+    padding: 8px;
+}
+
+.contact-preview-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    transition: background 0.15s;
+}
+
+.contact-preview-item:hover {
+    background: #f8fafc;
+    border-color: var(--border-color);
+}
+
+.contact-preview-avatar {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, var(--primary-color), #60a5fa);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.contact-preview-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.contact-preview-name {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.contact-preview-details {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.contact-preview-badge {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    background: #e0e7ff;
+    color: #4338ca;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
+.contacts-preview-footer {
+    padding: 10px 16px;
+    border-top: 1px solid var(--border-color);
+    background: #f8fafc;
+    text-align: center;
+    font-size: 0.85rem;
+}
+
+.contacts-preview-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-secondary);
+}
+
+.contacts-preview-empty i {
+    font-size: 2.5rem;
+    margin-bottom: 12px;
+    opacity: 0.4;
+    display: block;
+}
+
+/* Legacy styles for compatibility */
 .campaign-filters {
     background: #f8fafc;
     padding: 16px;

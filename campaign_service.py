@@ -311,12 +311,12 @@ class CampaignService:
         """Preview contacts that would be enrolled based on filter criteria"""
         contacts = get_all_contacts(
             mobile_only=True,
-            limit=1000,  # Preview limit
+            limit=5000,  # Preview limit
             **filter_criteria
         )
         
-        # Get sample of first 10 for preview
-        sample = contacts[:10] if len(contacts) > 10 else contacts
+        # Get sample of first 50 for preview display
+        sample = contacts[:50] if len(contacts) > 50 else contacts
         
         return len(contacts), sample
     

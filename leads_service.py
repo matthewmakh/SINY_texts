@@ -298,7 +298,8 @@ def get_owner_contacts(search: str = None, limit: int = 100, offset: int = 0):
 def get_all_contacts(search: str = None, mobile_only: bool = True, source: str = 'all', limit: int = 100, offset: int = 0, 
                      borough: str = None, role: str = None, neighborhood: str = None, zip_code: str = None,
                      job_type: str = None, work_type: str = None, permit_type: str = None,
-                     permit_status: str = None, bldg_type: str = None, residential: str = None):
+                     permit_status: str = None, bldg_type: str = None, residential: str = None,
+                     filing_status: str = None, zip: str = None, **kwargs):
     """
     Get contacts from both permit contacts and owner contacts.
     
@@ -311,14 +312,20 @@ def get_all_contacts(search: str = None, mobile_only: bool = True, source: str =
         borough: Filter by borough (MANHATTAN, BROOKLYN, etc.)
         role: Filter by role (Owner, Permittee)
         neighborhood: Filter by neighborhood (nta_name)
-        zip_code: Filter by zip code
+        zip_code: Filter by zip code (or use 'zip' alias)
         job_type: Filter by job type (A1, A2, NB, etc.)
         work_type: Filter by work type (OT, PL, EQ, etc.)
         permit_type: Filter by permit type
-        permit_status: Filter by permit status (ISSUED, etc.)
+        permit_status: Filter by permit status (ISSUED, etc.) - or use filing_status alias
         bldg_type: Filter by building type (1, 2)
         residential: Filter by residential (YES)
     """
+    # Handle aliases
+    if filing_status and not permit_status:
+        permit_status = filing_status
+    if zip and not zip_code:
+        zip_code = zip
+    
     contacts = []
     
     if source in ['all', 'permit']:

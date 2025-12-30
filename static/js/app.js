@@ -2484,43 +2484,136 @@ function wizardBack() {
 
 function getCampaignFilters() {
     const filters = {};
+    const search = document.getElementById('campaign-filter-search')?.value?.trim();
     const borough = document.getElementById('campaign-filter-borough').value;
     const role = document.getElementById('campaign-filter-role').value;
     const jobType = document.getElementById('campaign-filter-jobtype').value;
-    const bldgType = document.getElementById('campaign-filter-bldgtype').value;
-    const residential = document.getElementById('campaign-filter-residential').value;
+    const bldgType = document.getElementById('campaign-filter-bldgtype')?.value;
+    const residential = document.getElementById('campaign-filter-residential')?.value;
+    const workType = document.getElementById('campaign-filter-worktype')?.value;
+    const status = document.getElementById('campaign-filter-status')?.value;
+    const zip = document.getElementById('campaign-filter-zip')?.value?.trim();
     
+    if (search) filters.search = search;
     if (borough) filters.borough = borough;
     if (role) filters.role = role;
     if (jobType) filters.job_type = jobType;
     if (bldgType) filters.bldg_type = bldgType;
     if (residential) filters.residential = residential;
+    if (workType) filters.work_type = workType;
+    if (status) filters.filing_status = status;
+    if (zip) filters.zip = zip;
     
     return filters;
 }
 
+let previewDebounceTimer = null;
+
 async function updateCampaignPreview() {
+    // Debounce for search input
+    clearTimeout(previewDebounceTimer);
+    previewDebounceTimer = setTimeout(async () => {
+        await doUpdateCampaignPreview();
+    }, 300);
+}
+
+async function doUpdateCampaignPreview() {
     const filters = getCampaignFilters();
-    const countEl = document.getElementById('campaign-preview-count');
-    countEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>Loading contacts...</span>';
+    const countEl = document.getElementById('preview-count-number');
+    const listEl = document.getElementById('contacts-preview-list');
+    const footerEl = document.getElementById('contacts-preview-footer');
+    
+    // Show loading state
+    if (countEl) countEl.textContent = '...';
+    listEl.innerHTML = '<div class="loading-spinner" style="padding: 40px; text-align: center;"><i class="fas fa-spinner fa-spin"></i> Loading contacts...</div>';
     
     try {
         const result = await API.post('/campaigns/preview-enrollment', { filter_criteria: filters });
         if (result.success) {
             campaignState.previewCount = result.count;
             campaignState.previewContacts = result.sample;
-            countEl.innerHTML = `<i class="fas fa-users"></i> <span><strong>${result.count}</strong> contacts match your filters</span>`;
+            
+            // Update count
+            if (countEl) countEl.textContent = result.count.toLocaleString();
+            
+            // Update contacts list
+            renderContactsPreview(result.sample, result.count);
+            
+            // Show footer if more contacts than shown
+            if (footerEl) {
+                if (result.count > result.sample.length) {
+                    document.getElementById('total-contacts-count').textContent = result.count.toLocaleString();
+                    footerEl.style.display = 'block';
+                } else {
+                    footerEl.style.display = 'none';
+                }
+            }
             
             // Check for overlaps
-            if (result.count > 0) {
-                // Get phone numbers from sample for overlap check
-                const phones = result.sample.map(c => c.phone_normalized || c.phone);
-                await checkCampaignOverlap(phones);
+            if (result.count > 0 && result.sample.length > 0) {
+                const phones = result.sample.map(c => c.phone_normalized || c.phone).filter(Boolean);
+                if (phones.length > 0) {
+                    await checkCampaignOverlap(phones);
+                }
+            } else {
+                document.getElementById('campaign-overlap-warning').style.display = 'none';
             }
         }
     } catch (e) {
-        countEl.innerHTML = '<i class="fas fa-exclamation-circle"></i> <span>Error loading preview</span>';
+        console.error('Preview error:', e);
+        listEl.innerHTML = '<div class="contacts-preview-empty"><i class="fas fa-exclamation-circle"></i><p>Error loading contacts</p></div>';
     }
+}
+
+function renderContactsPreview(contacts, totalCount) {
+    const listEl = document.getElementById('contacts-preview-list');
+    
+    if (!contacts || contacts.length === 0) {
+        listEl.innerHTML = `
+            <div class="contacts-preview-empty">
+                <i class="fas fa-user-slash"></i>
+                <p>No contacts match your filters</p>
+                <small>Try adjusting your filter criteria</small>
+            </div>
+        `;
+        return;
+    }
+    
+    listEl.innerHTML = contacts.map(contact => {
+        const name = contact.name || contact.owner_name || 'Unknown';
+        const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+        const phone = contact.phone_normalized || contact.phone || '';
+        const borough = contact.borough || '';
+        const role = contact.role || contact.job_type || '';
+        
+        return `
+            <div class="contact-preview-item">
+                <div class="contact-preview-avatar">${initials}</div>
+                <div class="contact-preview-info">
+                    <div class="contact-preview-name">${escapeHtml(name)}</div>
+                    <div class="contact-preview-details">${escapeHtml(phone)}${borough ? ' • ' + borough : ''}</div>
+                </div>
+                ${role ? `<span class="contact-preview-badge">${escapeHtml(role)}</span>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+function clearCampaignFilters() {
+    document.getElementById('campaign-filter-search').value = '';
+    document.getElementById('campaign-filter-borough').value = '';
+    document.getElementById('campaign-filter-role').value = '';
+    document.getElementById('campaign-filter-jobtype').value = '';
+    
+    // Advanced filters
+    const advancedFilters = ['campaign-filter-bldgtype', 'campaign-filter-residential', 
+                            'campaign-filter-worktype', 'campaign-filter-status', 'campaign-filter-zip'];
+    advancedFilters.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    
+    updateCampaignPreview();
 }
 
 async function checkCampaignOverlap(phones) {
@@ -2800,11 +2893,38 @@ function initCampaignEventListeners() {
     document.getElementById('campaign-wizard-back')?.addEventListener('click', wizardBack);
     document.getElementById('campaign-wizard-save')?.addEventListener('click', saveCampaign);
     
-    // Filter changes
-    ['campaign-filter-borough', 'campaign-filter-role', 'campaign-filter-jobtype', 
-     'campaign-filter-bldgtype', 'campaign-filter-residential'].forEach(id => {
+    // Filter changes - basic filters
+    ['campaign-filter-borough', 'campaign-filter-role', 'campaign-filter-jobtype'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', updateCampaignPreview);
     });
+    
+    // Advanced filter changes
+    ['campaign-filter-bldgtype', 'campaign-filter-residential', 'campaign-filter-worktype', 
+     'campaign-filter-status'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', updateCampaignPreview);
+    });
+    
+    // Search input with debounce
+    document.getElementById('campaign-filter-search')?.addEventListener('input', updateCampaignPreview);
+    
+    // Zip code input
+    document.getElementById('campaign-filter-zip')?.addEventListener('input', updateCampaignPreview);
+    
+    // Advanced filters toggle
+    document.getElementById('campaign-advanced-toggle')?.addEventListener('click', () => {
+        const advPanel = document.getElementById('campaign-advanced-filters');
+        const btn = document.getElementById('campaign-advanced-toggle');
+        if (advPanel.style.display === 'none') {
+            advPanel.style.display = 'block';
+            btn.innerHTML = '<i class="fas fa-sliders-h"></i> Hide Advanced';
+        } else {
+            advPanel.style.display = 'none';
+            btn.innerHTML = '<i class="fas fa-sliders-h"></i> Advanced Filters';
+        }
+    });
+    
+    // Clear filters button
+    document.getElementById('campaign-clear-filters')?.addEventListener('click', clearCampaignFilters);
     
     // Overlap handling
     document.getElementById('campaign-exclude-overlap')?.addEventListener('click', () => {
