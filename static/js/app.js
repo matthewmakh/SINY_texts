@@ -2013,6 +2013,9 @@ function initAuthEventListeners() {
     // User management
     document.getElementById('add-user-btn')?.addEventListener('click', showAddUserModal);
     document.getElementById('save-user-btn')?.addEventListener('click', saveUser);
+    
+    // Campaign event listeners
+    initCampaignEventListeners();
 }
 
 // ============ Campaigns Module ============
@@ -2825,8 +2828,3 @@ function initCampaignEventListeners() {
         document.getElementById('abtest-options').style.display = e.target.checked ? 'block' : 'none';
     });
 }
-
-// Add to document ready
-document.addEventListener('DOMContentLoaded', () => {
-    initCampaignEventListeners();
-});
