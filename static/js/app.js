@@ -2653,20 +2653,26 @@ async function searchManualContacts() {
     try {
         const result = await API.get(`/contacts?search=${encodeURIComponent(searchTerm)}&limit=10`);
         if (result.success && result.contacts && result.contacts.length > 0) {
-            // Filter out contacts already added manually
-            const addedPhones = new Set(campaignState.manualContacts.map(c => c.phone || c.phone_normalized));
-            const filteredResults = result.contacts.filter(c => !addedPhones.has(c.phone) && !addedPhones.has(c.phone_normalized));
+            // Filter out contacts already added manually - normalize phone numbers for comparison
+            const normalizePhone = (p) => (p || '').replace(/\D/g, '').slice(-10);
+            const addedPhones = new Set(campaignState.manualContacts.map(c => normalizePhone(c.phone || c.phone_normalized)));
+            const filteredResults = result.contacts.filter(c => {
+                const contactPhone = normalizePhone(c.phone || c.phone_normalized);
+                return !addedPhones.has(contactPhone);
+            });
             
             if (filteredResults.length === 0) {
                 resultsEl.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted);">All matching contacts already added</div>';
             } else {
-                resultsEl.innerHTML = filteredResults.map(contact => {
+                // Store results for click handling
+                window._manualSearchResults = filteredResults;
+                resultsEl.innerHTML = filteredResults.map((contact, index) => {
                     const name = contact.name || contact.owner_name || 'Unknown';
                     const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
                     const phone = contact.phone_normalized || contact.phone || '';
                     
                     return `
-                        <div class="manual-search-item" onclick="addManualContact(${JSON.stringify(contact).replace(/"/g, '&quot;')})">
+                        <div class="manual-search-item" data-index="${index}">
                             <div class="contact-preview-avatar">${initials}</div>
                             <div class="manual-search-item-info">
                                 <div class="manual-search-item-name">${escapeHtml(name)}</div>
@@ -2676,11 +2682,20 @@ async function searchManualContacts() {
                         </div>
                     `;
                 }).join('');
+                
+                // Add click handlers
+                resultsEl.querySelectorAll('.manual-search-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        const index = parseInt(item.dataset.index);
+                        addManualContact(window._manualSearchResults[index]);
+                    });
+                });
             }
         } else {
             resultsEl.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted);">No contacts found</div>';
         }
     } catch (e) {
+        console.error('Search error:', e);
         resultsEl.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--danger-color);">Error searching</div>';
     }
 }
@@ -2704,10 +2719,9 @@ function addManualContact(contact) {
     showToast('Contact added', 'success');
 }
 
-function removeManualContact(phone) {
-    campaignState.manualContacts = campaignState.manualContacts.filter(c => 
-        (c.phone || c.phone_normalized) !== phone
-    );
+function removeManualContact(index) {
+    // Remove by index to avoid phone number string issues
+    campaignState.manualContacts.splice(index, 1);
     renderManualContacts();
     updateTotalContactCount();
 }
@@ -2725,22 +2739,29 @@ function renderManualContacts() {
     }
     
     // Update chips in filter panel
-    chipsEl.innerHTML = campaignState.manualContacts.map(contact => {
+    chipsEl.innerHTML = campaignState.manualContacts.map((contact, index) => {
         const name = contact.name || contact.owner_name || 'Unknown';
-        const phone = contact.phone || contact.phone_normalized;
         return `
             <span class="manual-added-chip">
                 ${escapeHtml(name.split(' ')[0])}
-                <button class="remove-btn" onclick="removeManualContact('${phone}')">&times;</button>
+                <button class="remove-btn" data-remove-index="${index}">&times;</button>
             </span>
         `;
     }).join('');
+    
+    // Add click handlers for remove buttons
+    chipsEl.querySelectorAll('.remove-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeManualContact(parseInt(btn.dataset.removeIndex));
+        });
+    });
     
     // Update preview section
     sectionEl.style.display = 'block';
     manualCountEl.textContent = campaignState.manualContacts.length;
     
-    listEl.innerHTML = campaignState.manualContacts.map(contact => {
+    listEl.innerHTML = campaignState.manualContacts.map((contact, index) => {
         const name = contact.name || contact.owner_name || 'Unknown';
         const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
         const phone = contact.phone_normalized || contact.phone || '';
@@ -2753,12 +2774,20 @@ function renderManualContacts() {
                     <div class="contact-preview-name">${escapeHtml(name)}</div>
                     <div class="contact-preview-details">${escapeHtml(phone)}${borough ? ' • ' + borough : ''}</div>
                 </div>
-                <button class="contact-remove-btn" onclick="removeManualContact('${phone}')" title="Remove">
+                <button class="contact-remove-btn" data-remove-index="${index}" title="Remove">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
         `;
     }).join('');
+    
+    // Add click handlers for preview list remove buttons
+    listEl.querySelectorAll('.contact-remove-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeManualContact(parseInt(btn.dataset.removeIndex));
+        });
+    });
 }
 
 function updateTotalContactCount() {
