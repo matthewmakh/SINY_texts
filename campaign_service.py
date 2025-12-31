@@ -123,16 +123,13 @@ class CampaignService:
             return campaign.to_dict()
     
     def delete_campaign(self, campaign_id: int) -> bool:
-        """Delete a campaign and all related data (only if draft)"""
+        """Delete a campaign and all related data"""
         with get_db_session() as session:
             campaign = session.query(Campaign).filter(Campaign.id == campaign_id).first()
             if not campaign:
                 return False
             
-            if campaign.status != CampaignStatus.DRAFT.value:
-                raise ValueError("Can only delete campaigns in draft status")
-            
-            # Delete related data
+            # Delete related data in correct order (foreign key constraints)
             session.query(CampaignSend).filter(CampaignSend.campaign_id == campaign_id).delete()
             session.query(CampaignEnrollment).filter(CampaignEnrollment.campaign_id == campaign_id).delete()
             session.query(CampaignABTest).filter(CampaignABTest.campaign_id == campaign_id).delete()
