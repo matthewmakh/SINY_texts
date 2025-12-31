@@ -2380,9 +2380,12 @@ function openCampaignWizard() {
             filter_criteria: {},
             messages: []
         },
-        previewContacts: [],
-        previewCount: 0,
-        manualContacts: [],
+        // New: explicit contact selection
+        availableContacts: [],
+        availableCount: 0,
+        availableOffset: 0,
+        selectedContacts: [],  // Map phone -> contact object
+        selectedPhoneSet: new Set(),
         overlappingPhones: [],
         excludeOverlap: false,
         editingCampaignId: null
@@ -2408,11 +2411,17 @@ function openCampaignWizard() {
         if (el) el.value = '';
     });
     
-    // Reset manual contacts
-    document.getElementById('campaign-manual-search').value = '';
-    document.getElementById('manual-search-results').style.display = 'none';
-    document.getElementById('manual-added-contacts').innerHTML = '';
-    document.getElementById('manual-contacts-section').style.display = 'none';
+    // Hide advanced filters
+    const advPanel = document.getElementById('campaign-advanced-filters');
+    if (advPanel) advPanel.style.display = 'none';
+    
+    // Reset selected search
+    const selectedSearch = document.getElementById('selected-search');
+    if (selectedSearch) selectedSearch.value = '';
+    
+    // Reset displays
+    renderAvailableContacts();
+    renderSelectedContacts();
     
     // Reset messages
     document.getElementById('campaign-messages-list').innerHTML = `
@@ -2451,7 +2460,7 @@ function showWizardStep(step) {
     
     // Load step-specific data
     if (step === 2) {
-        updateCampaignPreview();
+        loadAvailableContacts();
     }
     if (step === 4) {
         renderCampaignReview();
@@ -2473,14 +2482,11 @@ function wizardNext() {
     }
     
     if (campaignState.currentStep === 2) {
-        // Validate step 2 - need either filtered contacts or manual contacts
-        const totalContacts = campaignState.previewCount + campaignState.manualContacts.length;
-        if (totalContacts === 0) {
-            showToast('No contacts selected. Use filters or add contacts manually.', 'error');
+        // Validate step 2 - need at least one selected contact
+        if (campaignState.selectedContacts.length === 0) {
+            showToast('Please select at least one contact for this campaign.', 'error');
             return;
         }
-        // Save filter criteria
-        campaignState.campaignData.filter_criteria = getCampaignFilters();
     }
     
     if (campaignState.currentStep === 3) {
@@ -2533,91 +2539,317 @@ async function updateCampaignPreview() {
     }, 300);
 }
 
-async function doUpdateCampaignPreview() {
-    const filters = getCampaignFilters();
-    const countEl = document.getElementById('preview-count-number');
-    const filteredCountEl = document.getElementById('filtered-count');
-    const listEl = document.getElementById('contacts-preview-list');
-    const footerEl = document.getElementById('contacts-preview-footer');
+// ============ REDESIGNED CONTACT SELECTION (Step 2) ============
+
+let contactBrowserDebounce = null;
+
+async function loadAvailableContacts(reset = true) {
+    if (reset) {
+        campaignState.availableOffset = 0;
+        campaignState.availableContacts = [];
+    }
     
-    // Show loading state
-    if (countEl) countEl.textContent = '...';
-    listEl.innerHTML = '<div class="loading-spinner" style="padding: 40px; text-align: center;"><i class="fas fa-spinner fa-spin"></i> Loading contacts...</div>';
+    const filters = getCampaignFilters();
+    const listEl = document.getElementById('available-contacts-list');
+    const countEl = document.getElementById('available-count');
+    const addAllCountEl = document.getElementById('add-all-count');
+    const footerEl = document.getElementById('contact-browser-footer');
+    
+    // Show loading
+    if (reset) {
+        listEl.innerHTML = '<div class="browser-empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading contacts...</p></div>';
+    }
     
     try {
-        const result = await API.post('/campaigns/preview-enrollment', { filter_criteria: filters });
+        const result = await API.post('/campaigns/preview-enrollment', { 
+            filter_criteria: filters,
+            limit: 50,
+            offset: campaignState.availableOffset
+        });
+        
         if (result.success) {
-            campaignState.previewCount = result.count;
-            campaignState.previewContacts = result.sample;
+            campaignState.availableCount = result.count;
             
-            // Update total count (filtered + manual)
-            const totalCount = result.count + campaignState.manualContacts.length;
-            if (countEl) countEl.textContent = totalCount.toLocaleString();
-            
-            // Update filtered count
-            if (filteredCountEl) filteredCountEl.textContent = result.count.toLocaleString();
-            
-            // Update contacts list
-            renderContactsPreview(result.sample, result.count);
-            
-            // Show footer if more contacts than shown
-            if (footerEl) {
-                if (result.count > result.sample.length) {
-                    document.getElementById('total-contacts-count').textContent = result.count.toLocaleString();
-                    footerEl.style.display = 'block';
-                } else {
-                    footerEl.style.display = 'none';
-                }
-            }
-            
-            // Check for overlaps
-            if (result.count > 0 && result.sample.length > 0) {
-                const phones = result.sample.map(c => c.phone_normalized || c.phone).filter(Boolean);
-                if (phones.length > 0) {
-                    await checkCampaignOverlap(phones);
-                }
+            if (reset) {
+                campaignState.availableContacts = result.sample || [];
             } else {
-                document.getElementById('campaign-overlap-warning').style.display = 'none';
+                campaignState.availableContacts = [...campaignState.availableContacts, ...(result.sample || [])];
             }
+            
+            // Update counts
+            countEl.textContent = result.count.toLocaleString();
+            addAllCountEl.textContent = result.count > 0 ? `(${result.count.toLocaleString()})` : '';
+            
+            // Render contacts
+            renderAvailableContacts();
+            
+            // Show/hide load more
+            const showingCount = campaignState.availableContacts.length;
+            document.getElementById('showing-count').textContent = showingCount;
+            document.getElementById('total-available-count').textContent = result.count.toLocaleString();
+            footerEl.style.display = result.count > showingCount ? 'flex' : 'none';
         }
     } catch (e) {
-        console.error('Preview error:', e);
-        listEl.innerHTML = '<div class="contacts-preview-empty"><i class="fas fa-exclamation-circle"></i><p>Error loading contacts</p></div>';
+        console.error('Load contacts error:', e);
+        listEl.innerHTML = '<div class="browser-empty-state"><i class="fas fa-exclamation-circle"></i><p>Error loading contacts</p></div>';
     }
 }
 
-function renderContactsPreview(contacts, totalCount) {
-    const listEl = document.getElementById('contacts-preview-list');
+function renderAvailableContacts() {
+    const listEl = document.getElementById('available-contacts-list');
+    const contacts = campaignState.availableContacts;
     
     if (!contacts || contacts.length === 0) {
         listEl.innerHTML = `
-            <div class="contacts-preview-empty">
-                <i class="fas fa-user-slash"></i>
-                <p>No contacts match your filters</p>
-                <small>Try adjusting your filter criteria</small>
+            <div class="browser-empty-state">
+                <i class="fas fa-search"></i>
+                <p>No contacts found</p>
+                <small>Try adjusting your filters</small>
             </div>
         `;
         return;
     }
     
-    listEl.innerHTML = contacts.map(contact => {
+    listEl.innerHTML = contacts.map((contact, index) => {
+        const name = contact.name || contact.owner_name || 'Unknown';
+        const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+        const phone = contact.phone_normalized || contact.phone || '';
+        const normalizedPhone = normalizePhoneForComparison(phone);
+        const borough = contact.borough || '';
+        const role = contact.role || '';
+        const isAdded = campaignState.selectedPhoneSet.has(normalizedPhone);
+        
+        return `
+            <div class="contact-row ${isAdded ? 'added' : ''}" data-index="${index}" data-phone="${normalizedPhone}">
+                <div class="avatar">${initials}</div>
+                <div class="info">
+                    <div class="name">${escapeHtml(name)}</div>
+                    <div class="details">${escapeHtml(phone)}${borough ? ' • ' + borough : ''}</div>
+                </div>
+                ${role ? `<span class="badge">${escapeHtml(role)}</span>` : ''}
+                <button class="action-btn add-btn" ${isAdded ? 'disabled' : ''} title="${isAdded ? 'Already added' : 'Add to campaign'}">
+                    <i class="fas ${isAdded ? 'fa-check' : 'fa-plus'}"></i>
+                </button>
+            </div>
+        `;
+    }).join('');
+    
+    // Add click handlers
+    listEl.querySelectorAll('.contact-row:not(.added) .add-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const row = btn.closest('.contact-row');
+            const index = parseInt(row.dataset.index);
+            addContactToCampaign(campaignState.availableContacts[index]);
+        });
+    });
+}
+
+function normalizePhoneForComparison(phone) {
+    return (phone || '').replace(/\D/g, '').slice(-10);
+}
+
+function addContactToCampaign(contact) {
+    const phone = contact.phone_normalized || contact.phone || '';
+    const normalizedPhone = normalizePhoneForComparison(phone);
+    
+    if (campaignState.selectedPhoneSet.has(normalizedPhone)) {
+        showToast('Contact already added', 'info');
+        return;
+    }
+    
+    campaignState.selectedContacts.push(contact);
+    campaignState.selectedPhoneSet.add(normalizedPhone);
+    
+    // Update UI
+    renderAvailableContacts();  // Re-render to show as "added"
+    renderSelectedContacts();
+    updateSelectedCount();
+}
+
+function removeContactFromCampaign(index) {
+    const contact = campaignState.selectedContacts[index];
+    const phone = contact.phone_normalized || contact.phone || '';
+    const normalizedPhone = normalizePhoneForComparison(phone);
+    
+    campaignState.selectedContacts.splice(index, 1);
+    campaignState.selectedPhoneSet.delete(normalizedPhone);
+    
+    // Update UI
+    renderAvailableContacts();  // Re-render to show as available again
+    renderSelectedContacts();
+    updateSelectedCount();
+}
+
+function renderSelectedContacts() {
+    const listEl = document.getElementById('selected-contacts-list');
+    const clearBtn = document.getElementById('clear-all-selected-btn');
+    const searchTerm = (document.getElementById('selected-search')?.value || '').toLowerCase().trim();
+    
+    let contacts = campaignState.selectedContacts;
+    
+    // Filter by search if needed
+    if (searchTerm) {
+        contacts = contacts.filter(c => {
+            const name = (c.name || c.owner_name || '').toLowerCase();
+            const phone = (c.phone_normalized || c.phone || '');
+            return name.includes(searchTerm) || phone.includes(searchTerm);
+        });
+    }
+    
+    // Show/hide clear button
+    clearBtn.style.display = campaignState.selectedContacts.length > 0 ? 'inline-flex' : 'none';
+    
+    if (contacts.length === 0) {
+        if (campaignState.selectedContacts.length === 0) {
+            listEl.innerHTML = `
+                <div class="selected-empty-state">
+                    <i class="fas fa-user-plus"></i>
+                    <p>No contacts selected</p>
+                    <small>Click + to add contacts from the left panel</small>
+                </div>
+            `;
+        } else {
+            listEl.innerHTML = `
+                <div class="selected-empty-state">
+                    <i class="fas fa-search"></i>
+                    <p>No matches</p>
+                    <small>No selected contacts match your search</small>
+                </div>
+            `;
+        }
+        return;
+    }
+    
+    listEl.innerHTML = contacts.map((contact, displayIndex) => {
+        // Find actual index in selectedContacts array
+        const actualIndex = campaignState.selectedContacts.indexOf(contact);
         const name = contact.name || contact.owner_name || 'Unknown';
         const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
         const phone = contact.phone_normalized || contact.phone || '';
         const borough = contact.borough || '';
-        const role = contact.role || contact.job_type || '';
+        const role = contact.role || '';
         
         return `
-            <div class="contact-preview-item">
-                <div class="contact-preview-avatar">${initials}</div>
-                <div class="contact-preview-info">
-                    <div class="contact-preview-name">${escapeHtml(name)}</div>
-                    <div class="contact-preview-details">${escapeHtml(phone)}${borough ? ' • ' + borough : ''}</div>
+            <div class="contact-row" data-index="${actualIndex}">
+                <div class="avatar">${initials}</div>
+                <div class="info">
+                    <div class="name">${escapeHtml(name)}</div>
+                    <div class="details">${escapeHtml(phone)}${borough ? ' • ' + borough : ''}</div>
                 </div>
-                ${role ? `<span class="contact-preview-badge">${escapeHtml(role)}</span>` : ''}
+                ${role ? `<span class="badge">${escapeHtml(role)}</span>` : ''}
+                <button class="action-btn remove-btn" title="Remove from campaign">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
         `;
     }).join('');
+    
+    // Add click handlers for remove buttons
+    listEl.querySelectorAll('.remove-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const row = btn.closest('.contact-row');
+            const index = parseInt(row.dataset.index);
+            removeContactFromCampaign(index);
+        });
+    });
+}
+
+function updateSelectedCount() {
+    const count = campaignState.selectedContacts.length;
+    document.getElementById('selected-count').textContent = count.toLocaleString();
+}
+
+function addAllFilteredContacts() {
+    if (campaignState.availableCount === 0) {
+        showToast('No contacts to add', 'info');
+        return;
+    }
+    
+    // For now, add all currently loaded contacts
+    // For large sets, we'd need to fetch all contacts from server
+    if (campaignState.availableCount > 500) {
+        if (!confirm(`This will add ${campaignState.availableCount.toLocaleString()} contacts to the campaign. Continue?`)) {
+            return;
+        }
+    }
+    
+    // If we have more contacts than loaded, we need to fetch all
+    if (campaignState.availableCount > campaignState.availableContacts.length) {
+        addAllFilteredContactsAsync();
+        return;
+    }
+    
+    // Add all loaded contacts
+    let addedCount = 0;
+    for (const contact of campaignState.availableContacts) {
+        const phone = contact.phone_normalized || contact.phone || '';
+        const normalizedPhone = normalizePhoneForComparison(phone);
+        
+        if (!campaignState.selectedPhoneSet.has(normalizedPhone)) {
+            campaignState.selectedContacts.push(contact);
+            campaignState.selectedPhoneSet.add(normalizedPhone);
+            addedCount++;
+        }
+    }
+    
+    renderAvailableContacts();
+    renderSelectedContacts();
+    updateSelectedCount();
+    showToast(`Added ${addedCount} contacts`, 'success');
+}
+
+async function addAllFilteredContactsAsync() {
+    const filters = getCampaignFilters();
+    showToast('Loading all contacts...', 'info');
+    
+    try {
+        // Fetch all contacts matching filters (backend needs to support this)
+        const result = await API.post('/campaigns/preview-enrollment', { 
+            filter_criteria: filters,
+            limit: 10000,  // Get all
+            offset: 0
+        });
+        
+        if (result.success && result.sample) {
+            let addedCount = 0;
+            for (const contact of result.sample) {
+                const phone = contact.phone_normalized || contact.phone || '';
+                const normalizedPhone = normalizePhoneForComparison(phone);
+                
+                if (!campaignState.selectedPhoneSet.has(normalizedPhone)) {
+                    campaignState.selectedContacts.push(contact);
+                    campaignState.selectedPhoneSet.add(normalizedPhone);
+                    addedCount++;
+                }
+            }
+            
+            renderAvailableContacts();
+            renderSelectedContacts();
+            updateSelectedCount();
+            showToast(`Added ${addedCount} contacts`, 'success');
+        }
+    } catch (e) {
+        console.error('Error adding all contacts:', e);
+        showToast('Error adding contacts', 'error');
+    }
+}
+
+function clearAllSelectedContacts() {
+    if (campaignState.selectedContacts.length === 0) return;
+    
+    if (!confirm(`Remove all ${campaignState.selectedContacts.length} selected contacts?`)) {
+        return;
+    }
+    
+    campaignState.selectedContacts = [];
+    campaignState.selectedPhoneSet.clear();
+    
+    renderAvailableContacts();
+    renderSelectedContacts();
+    updateSelectedCount();
+    showToast('All contacts removed', 'info');
 }
 
 function clearCampaignFilters() {
@@ -2634,170 +2866,32 @@ function clearCampaignFilters() {
         if (el) el.value = '';
     });
     
-    updateCampaignPreview();
+    loadAvailableContacts();
 }
 
-// Manual Contact Search and Add
-async function searchManualContacts() {
-    const searchTerm = document.getElementById('campaign-manual-search').value.trim();
-    const resultsEl = document.getElementById('manual-search-results');
-    
-    if (!searchTerm || searchTerm.length < 2) {
-        resultsEl.style.display = 'none';
-        return;
-    }
-    
-    resultsEl.innerHTML = '<div style="padding: 12px; text-align: center;"><i class="fas fa-spinner fa-spin"></i></div>';
-    resultsEl.style.display = 'block';
-    
-    try {
-        const result = await API.get(`/contacts?search=${encodeURIComponent(searchTerm)}&limit=10`);
-        if (result.success && result.contacts && result.contacts.length > 0) {
-            // Filter out contacts already added manually - normalize phone numbers for comparison
-            const normalizePhone = (p) => (p || '').replace(/\D/g, '').slice(-10);
-            const addedPhones = new Set(campaignState.manualContacts.map(c => normalizePhone(c.phone || c.phone_normalized)));
-            const filteredResults = result.contacts.filter(c => {
-                const contactPhone = normalizePhone(c.phone || c.phone_normalized);
-                return !addedPhones.has(contactPhone);
-            });
-            
-            if (filteredResults.length === 0) {
-                resultsEl.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted);">All matching contacts already added</div>';
-            } else {
-                // Store results for click handling
-                window._manualSearchResults = filteredResults;
-                resultsEl.innerHTML = filteredResults.map((contact, index) => {
-                    const name = contact.name || contact.owner_name || 'Unknown';
-                    const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-                    const phone = contact.phone_normalized || contact.phone || '';
-                    
-                    return `
-                        <div class="manual-search-item" data-index="${index}">
-                            <div class="contact-preview-avatar">${initials}</div>
-                            <div class="manual-search-item-info">
-                                <div class="manual-search-item-name">${escapeHtml(name)}</div>
-                                <div class="manual-search-item-phone">${escapeHtml(phone)}</div>
-                            </div>
-                            <i class="fas fa-plus-circle add-btn"></i>
-                        </div>
-                    `;
-                }).join('');
-                
-                // Add click handlers
-                resultsEl.querySelectorAll('.manual-search-item').forEach(item => {
-                    item.addEventListener('click', () => {
-                        const index = parseInt(item.dataset.index);
-                        addManualContact(window._manualSearchResults[index]);
-                    });
-                });
-            }
-        } else {
-            resultsEl.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted);">No contacts found</div>';
-        }
-    } catch (e) {
-        console.error('Search error:', e);
-        resultsEl.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--danger-color);">Error searching</div>';
-    }
+function loadMoreContacts() {
+    campaignState.availableOffset += 50;
+    loadAvailableContacts(false);
 }
 
-function addManualContact(contact) {
-    // Avoid duplicates
-    const phone = contact.phone || contact.phone_normalized;
-    if (campaignState.manualContacts.some(c => (c.phone || c.phone_normalized) === phone)) {
-        showToast('Contact already added', 'error');
-        return;
-    }
-    
-    campaignState.manualContacts.push(contact);
-    renderManualContacts();
-    updateTotalContactCount();
-    
-    // Clear search
-    document.getElementById('campaign-manual-search').value = '';
-    document.getElementById('manual-search-results').style.display = 'none';
-    
-    showToast('Contact added', 'success');
+// Debounced filter update
+function updateContactBrowser() {
+    clearTimeout(contactBrowserDebounce);
+    contactBrowserDebounce = setTimeout(() => {
+        loadAvailableContacts();
+    }, 300);
 }
 
-function removeManualContact(index) {
-    // Remove by index to avoid phone number string issues
-    campaignState.manualContacts.splice(index, 1);
-    renderManualContacts();
-    updateTotalContactCount();
-}
-
-function renderManualContacts() {
-    const chipsEl = document.getElementById('manual-added-contacts');
-    const sectionEl = document.getElementById('manual-contacts-section');
-    const listEl = document.getElementById('manual-contacts-list');
-    const manualCountEl = document.getElementById('manual-count');
-    
-    if (campaignState.manualContacts.length === 0) {
-        chipsEl.innerHTML = '';
-        sectionEl.style.display = 'none';
-        return;
-    }
-    
-    // Update chips in filter panel
-    chipsEl.innerHTML = campaignState.manualContacts.map((contact, index) => {
-        const name = contact.name || contact.owner_name || 'Unknown';
-        return `
-            <span class="manual-added-chip">
-                ${escapeHtml(name.split(' ')[0])}
-                <button class="remove-btn" data-remove-index="${index}">&times;</button>
-            </span>
-        `;
-    }).join('');
-    
-    // Add click handlers for remove buttons
-    chipsEl.querySelectorAll('.remove-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            removeManualContact(parseInt(btn.dataset.removeIndex));
-        });
-    });
-    
-    // Update preview section
-    sectionEl.style.display = 'block';
-    manualCountEl.textContent = campaignState.manualContacts.length;
-    
-    listEl.innerHTML = campaignState.manualContacts.map((contact, index) => {
-        const name = contact.name || contact.owner_name || 'Unknown';
-        const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-        const phone = contact.phone_normalized || contact.phone || '';
-        const borough = contact.borough || '';
-        
-        return `
-            <div class="contact-preview-item">
-                <div class="contact-preview-avatar">${initials}</div>
-                <div class="contact-preview-info">
-                    <div class="contact-preview-name">${escapeHtml(name)}</div>
-                    <div class="contact-preview-details">${escapeHtml(phone)}${borough ? ' • ' + borough : ''}</div>
-                </div>
-                <button class="contact-remove-btn" data-remove-index="${index}" title="Remove">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-        `;
-    }).join('');
-    
-    // Add click handlers for preview list remove buttons
-    listEl.querySelectorAll('.contact-remove-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            removeManualContact(parseInt(btn.dataset.removeIndex));
-        });
-    });
-}
-
-function updateTotalContactCount() {
-    const totalCount = campaignState.previewCount + campaignState.manualContacts.length;
-    const countEl = document.getElementById('preview-count-number');
-    if (countEl) countEl.textContent = totalCount.toLocaleString();
-}
+// ============ END REDESIGNED CONTACT SELECTION ============
 
 async function checkCampaignOverlap(phones) {
+    // Simplified - just log for now since we're doing explicit selection
+    console.log('Checking overlap for', phones.length, 'contacts');
+}
+
+async function oldCheckCampaignOverlap(phones) {
     const warningEl = document.getElementById('campaign-overlap-warning');
+    if (!warningEl) return;
     
     try {
         const result = await API.post('/campaigns/check-overlap', { phone_numbers: phones });
@@ -2965,6 +3059,7 @@ function insertCampaignVar(variable) {
 
 function renderCampaignReview() {
     const data = campaignState.campaignData;
+    const selectedCount = campaignState.selectedContacts.length;
     const container = document.getElementById('campaign-review');
     
     container.innerHTML = `
@@ -2974,13 +3069,12 @@ function renderCampaignReview() {
             ${data.description ? `<p style="color: var(--text-secondary);">${escapeHtml(data.description)}</p>` : ''}
         </div>
         <div class="campaign-review-section">
-            <h5>Enrollment</h5>
+            <h5>Contacts</h5>
             <div class="campaign-review-value">
-                ${data.enrollment_type === 'snapshot' ? '📷 Snapshot' : '🔄 Dynamic'} • 
-                ${campaignState.previewCount} contacts
+                <span style="font-size: 1.2rem; color: var(--primary-color);">${selectedCount.toLocaleString()}</span> contacts selected
             </div>
             <p style="color: var(--text-secondary); margin-top: 4px;">
-                Filters: ${Object.entries(data.filter_criteria).map(([k, v]) => `${k}: ${v}`).join(', ') || 'None'}
+                ${data.enrollment_type === 'snapshot' ? '📷 Snapshot - contacts locked at creation' : '🔄 Dynamic - contacts update based on filters'}
             </p>
         </div>
         <div class="campaign-review-section">
@@ -3009,12 +3103,12 @@ async function saveCampaign() {
     const data = campaignState.campaignData;
     
     try {
-        // 1. Create the campaign
+        // 1. Create the campaign (no filter_criteria needed with explicit selection)
         const campaignResult = await API.post('/campaigns', {
             name: data.name,
             description: data.description,
-            enrollment_type: data.enrollment_type,
-            filter_criteria: data.filter_criteria,
+            enrollment_type: 'snapshot',  // Always snapshot with explicit selection
+            filter_criteria: '{}',  // Empty - we're using explicit contacts
             default_send_time: data.default_send_time
         });
         
@@ -3044,18 +3138,19 @@ async function saveCampaign() {
             }
         }
         
-        // 3. Enroll contacts
-        const enrollData = {
-            use_filters: true,
-            exclude_phones: campaignState.excludeOverlap ? campaignState.overlappingPhones : [],
-            manual_contacts: campaignState.manualContacts.map(c => ({
-                phone: c.phone || c.phone_normalized,
-                name: c.name || c.owner_name || 'Unknown',
-                borough: c.borough || '',
-                role: c.role || ''
-            }))
-        };
-        const enrollResult = await API.post(`/campaigns/${campaignId}/enroll`, enrollData);
+        // 3. Enroll contacts - send explicit list of selected contacts
+        const contactsToEnroll = campaignState.selectedContacts.map(c => ({
+            phone: c.phone_normalized || c.phone,
+            name: c.name || c.owner_name || 'Unknown',
+            company: c.company || c.owner_business_name || '',
+            borough: c.borough || '',
+            role: c.role || ''
+        }));
+        
+        const enrollResult = await API.post(`/campaigns/${campaignId}/enroll`, {
+            contacts: contactsToEnroll,
+            use_filters: false  // Explicit contact list, not filters
+        });
         
         showToast(`Campaign created with ${enrollResult.enrolled_count || 0} contacts enrolled!`, 'success');
         hideModal('campaign-modal');
@@ -3080,64 +3175,51 @@ function initCampaignEventListeners() {
     document.getElementById('campaign-wizard-back')?.addEventListener('click', wizardBack);
     document.getElementById('campaign-wizard-save')?.addEventListener('click', saveCampaign);
     
-    // Filter changes - basic filters
+    // Filter changes - basic filters (NEW: use updateContactBrowser)
     ['campaign-filter-borough', 'campaign-filter-role', 'campaign-filter-jobtype'].forEach(id => {
-        document.getElementById(id)?.addEventListener('change', updateCampaignPreview);
+        document.getElementById(id)?.addEventListener('change', updateContactBrowser);
     });
     
     // Advanced filter changes
     ['campaign-filter-bldgtype', 'campaign-filter-residential', 'campaign-filter-worktype', 
      'campaign-filter-status'].forEach(id => {
-        document.getElementById(id)?.addEventListener('change', updateCampaignPreview);
+        document.getElementById(id)?.addEventListener('change', updateContactBrowser);
     });
     
     // Search input with debounce
-    document.getElementById('campaign-filter-search')?.addEventListener('input', updateCampaignPreview);
+    document.getElementById('campaign-filter-search')?.addEventListener('input', updateContactBrowser);
     
     // Zip code input
-    document.getElementById('campaign-filter-zip')?.addEventListener('input', updateCampaignPreview);
+    document.getElementById('campaign-filter-zip')?.addEventListener('input', updateContactBrowser);
     
     // Advanced filters toggle
     document.getElementById('campaign-advanced-toggle')?.addEventListener('click', () => {
         const advPanel = document.getElementById('campaign-advanced-filters');
         const btn = document.getElementById('campaign-advanced-toggle');
         if (advPanel.style.display === 'none') {
-            advPanel.style.display = 'block';
-            btn.innerHTML = '<i class="fas fa-sliders-h"></i> Hide Advanced';
+            advPanel.style.display = 'flex';
+            btn.innerHTML = '<i class="fas fa-sliders-h"></i> Less';
         } else {
             advPanel.style.display = 'none';
-            btn.innerHTML = '<i class="fas fa-sliders-h"></i> Advanced Filters';
+            btn.innerHTML = '<i class="fas fa-sliders-h"></i> More';
         }
     });
     
     // Clear filters button
     document.getElementById('campaign-clear-filters')?.addEventListener('click', clearCampaignFilters);
     
-    // Manual contact search
-    document.getElementById('campaign-manual-search-btn')?.addEventListener('click', searchManualContacts);
-    document.getElementById('campaign-manual-search')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') searchManualContacts();
-    });
-    // Hide search results when clicking outside
-    document.addEventListener('click', (e) => {
-        const resultsEl = document.getElementById('manual-search-results');
-        const searchArea = document.querySelector('.manual-search-input-wrapper');
-        if (resultsEl && searchArea && !searchArea.contains(e.target)) {
-            resultsEl.style.display = 'none';
-        }
-    });
+    // NEW: Add All Filtered button
+    document.getElementById('add-all-filtered-btn')?.addEventListener('click', addAllFilteredContacts);
     
-    // Overlap handling
-    document.getElementById('campaign-exclude-overlap')?.addEventListener('click', () => {
-        campaignState.excludeOverlap = true;
-        document.getElementById('campaign-overlap-warning').style.display = 'none';
-        showToast('Overlapping contacts will be excluded', 'success');
-    });
+    // NEW: Clear All Selected button
+    document.getElementById('clear-all-selected-btn')?.addEventListener('click', clearAllSelectedContacts);
     
-    document.getElementById('campaign-include-overlap')?.addEventListener('click', () => {
-        campaignState.excludeOverlap = false;
-        document.getElementById('campaign-overlap-warning').style.display = 'none';
-        showToast('Overlapping contacts will be included', 'success');
+    // NEW: Load More button
+    document.getElementById('load-more-contacts-btn')?.addEventListener('click', loadMoreContacts);
+    
+    // NEW: Search selected contacts
+    document.getElementById('selected-search')?.addEventListener('input', () => {
+        renderSelectedContacts();
     });
     
     // Add message button

@@ -307,18 +307,21 @@ class CampaignService:
     # ENROLLMENT
     # =========================================================================
     
-    def preview_enrollment(self, filter_criteria: dict) -> Tuple[int, List[dict]]:
+    def preview_enrollment(self, filter_criteria: dict, limit: int = 50, offset: int = 0) -> Tuple[int, List[dict]]:
         """Preview contacts that would be enrolled based on filter criteria"""
-        contacts = get_all_contacts(
+        # Get total count first
+        all_contacts = get_all_contacts(
             mobile_only=True,
-            limit=5000,  # Preview limit
+            limit=10000,  # Max for counting
             **filter_criteria
         )
         
-        # Get sample of first 50 for preview display
-        sample = contacts[:50] if len(contacts) > 50 else contacts
+        total_count = len(all_contacts)
         
-        return len(contacts), sample
+        # Get slice for display
+        sample = all_contacts[offset:offset + limit]
+        
+        return total_count, sample
     
     def check_overlap(self, phone_numbers: List[str]) -> Dict[str, List[str]]:
         """Check if any phone numbers are already enrolled in active campaigns"""

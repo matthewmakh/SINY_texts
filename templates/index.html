@@ -784,82 +784,64 @@
                     </div>
                 </div>
                 
-                <!-- Step 2: Contact Selection -->
+                <!-- Step 2: Contact Selection (Redesigned) -->
                 <div class="wizard-content" id="campaign-step-2" style="display: none;">
-                    <div class="campaign-contacts-layout">
-                        <!-- Left: Filters -->
-                        <div class="campaign-filters-panel">
-                            <h4><i class="fas fa-filter"></i> Filter Contacts</h4>
-                            
-                            <!-- Search -->
-                            <div class="filter-group">
-                                <label>Search</label>
-                                <div class="filter-search-input">
-                                    <i class="fas fa-search"></i>
-                                    <input type="text" id="campaign-filter-search" placeholder="Name, company, phone...">
-                                </div>
+                    <div class="contact-selector-layout">
+                        <!-- Left: Available Contacts Browser -->
+                        <div class="contact-browser-panel">
+                            <div class="contact-browser-header">
+                                <h4><i class="fas fa-address-book"></i> Available Contacts</h4>
                             </div>
                             
-                            <!-- Basic Filters -->
-                            <div class="filter-group">
-                                <label>Borough</label>
-                                <select id="campaign-filter-borough">
-                                    <option value="">All Boroughs</option>
-                                    <option value="MANHATTAN">Manhattan</option>
-                                    <option value="BROOKLYN">Brooklyn</option>
-                                    <option value="QUEENS">Queens</option>
-                                    <option value="BRONX">Bronx</option>
-                                    <option value="STATEN ISLAND">Staten Island</option>
-                                </select>
-                            </div>
-                            
-                            <div class="filter-group">
-                                <label>Role</label>
-                                <select id="campaign-filter-role">
-                                    <option value="">All Roles</option>
-                                    <option value="Owner">Owner</option>
-                                    <option value="Permittee">Permittee</option>
-                                </select>
-                            </div>
-                            
-                            <div class="filter-group">
-                                <label>Job Type</label>
-                                <select id="campaign-filter-jobtype">
-                                    <option value="">All Job Types</option>
-                                    <option value="A1">A1 - Alteration Type 1</option>
-                                    <option value="A2">A2 - Alteration Type 2</option>
-                                    <option value="A3">A3 - Alteration Type 3</option>
-                                    <option value="NB">NB - New Building</option>
-                                    <option value="DM">DM - Demolition</option>
-                                </select>
-                            </div>
-                            
-                            <!-- Advanced Filters Toggle -->
-                            <button type="button" class="btn btn-sm btn-outline" id="campaign-advanced-toggle" style="width: 100%; margin: 8px 0;">
-                                <i class="fas fa-sliders-h"></i> Advanced Filters
-                            </button>
-                            
-                            <!-- Advanced Filters -->
-                            <div class="campaign-advanced-filters" id="campaign-advanced-filters" style="display: none;">
-                                <div class="filter-group">
-                                    <label>Building Type</label>
-                                    <select id="campaign-filter-bldgtype">
-                                        <option value="">All</option>
-                                        <option value="1">1 - One/Two Family</option>
-                                        <option value="2">2 - Multiple Dwelling</option>
+                            <!-- Filters Row -->
+                            <div class="contact-browser-filters">
+                                <div class="filter-row">
+                                    <div class="filter-search-wrapper">
+                                        <i class="fas fa-search"></i>
+                                        <input type="text" id="campaign-filter-search" placeholder="Search name, company, phone...">
+                                    </div>
+                                    <select id="campaign-filter-borough">
+                                        <option value="">All Boroughs</option>
+                                        <option value="MANHATTAN">Manhattan</option>
+                                        <option value="BROOKLYN">Brooklyn</option>
+                                        <option value="QUEENS">Queens</option>
+                                        <option value="BRONX">Bronx</option>
+                                        <option value="STATEN ISLAND">Staten Island</option>
+                                    </select>
+                                    <select id="campaign-filter-role">
+                                        <option value="">All Roles</option>
+                                        <option value="Owner">Owner</option>
+                                        <option value="Permittee">Permittee</option>
                                     </select>
                                 </div>
+                                <div class="filter-row">
+                                    <select id="campaign-filter-jobtype">
+                                        <option value="">All Job Types</option>
+                                        <option value="A1">A1 - Alteration 1</option>
+                                        <option value="A2">A2 - Alteration 2</option>
+                                        <option value="A3">A3 - Alteration 3</option>
+                                        <option value="NB">NB - New Building</option>
+                                        <option value="DM">DM - Demolition</option>
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-outline" id="campaign-advanced-toggle">
+                                        <i class="fas fa-sliders-h"></i> More
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-secondary" id="campaign-clear-filters">
+                                        <i class="fas fa-times"></i> Clear
+                                    </button>
+                                </div>
                                 
-                                <div class="filter-group">
-                                    <label>Residential</label>
+                                <!-- Advanced Filters (hidden by default) -->
+                                <div class="filter-row advanced-filters" id="campaign-advanced-filters" style="display: none;">
+                                    <select id="campaign-filter-bldgtype">
+                                        <option value="">All Building Types</option>
+                                        <option value="1">One/Two Family</option>
+                                        <option value="2">Multiple Dwelling</option>
+                                    </select>
                                     <select id="campaign-filter-residential">
                                         <option value="">All</option>
                                         <option value="YES">Residential Only</option>
                                     </select>
-                                </div>
-                                
-                                <div class="filter-group">
-                                    <label>Work Type</label>
                                     <select id="campaign-filter-worktype">
                                         <option value="">All Work Types</option>
                                         <option value="OT">OT - Other</option>
@@ -869,85 +851,67 @@
                                         <option value="SP">SP - Sprinkler</option>
                                         <option value="FP">FP - Fire Protection</option>
                                     </select>
-                                </div>
-                                
-                                <div class="filter-group">
-                                    <label>Permit Status</label>
                                     <select id="campaign-filter-status">
                                         <option value="">All Statuses</option>
                                         <option value="ISSUED">Issued</option>
                                         <option value="RE-ISSUED">Re-Issued</option>
                                         <option value="IN PROCESS">In Process</option>
                                     </select>
-                                </div>
-                                
-                                <div class="filter-group">
-                                    <label>Zip Code</label>
-                                    <input type="text" id="campaign-filter-zip" placeholder="e.g., 11201">
+                                    <input type="text" id="campaign-filter-zip" placeholder="Zip Code">
                                 </div>
                             </div>
                             
-                            <button type="button" class="btn btn-sm btn-secondary" id="campaign-clear-filters" style="width: 100%; margin-top: 8px;">
-                                <i class="fas fa-times"></i> Clear All Filters
-                            </button>
+                            <!-- Actions Bar -->
+                            <div class="contact-browser-actions">
+                                <span class="contact-browser-count">
+                                    <span id="available-count">0</span> contacts found
+                                </span>
+                                <button type="button" class="btn btn-sm btn-primary" id="add-all-filtered-btn">
+                                    <i class="fas fa-plus-circle"></i> Add All <span id="add-all-count"></span>
+                                </button>
+                            </div>
                             
-                            <!-- Manual Contact Add Section -->
-                            <div class="manual-add-section">
-                                <h5><i class="fas fa-user-plus"></i> Add Specific Contacts</h5>
-                                <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 8px;">Add contacts that don't match filters</p>
-                                <div class="manual-add-search">
-                                    <input type="text" id="campaign-manual-search" placeholder="Search by name or phone...">
-                                    <button type="button" class="btn btn-sm btn-primary" id="campaign-manual-search-btn">
-                                        <i class="fas fa-search"></i>
-                                    </button>
+                            <!-- Contact List -->
+                            <div class="contact-browser-list" id="available-contacts-list">
+                                <div class="browser-empty-state">
+                                    <i class="fas fa-search"></i>
+                                    <p>Use filters above to find contacts</p>
                                 </div>
-                                <div class="manual-search-results" id="manual-search-results" style="display: none;"></div>
-                                <div class="manual-added-contacts" id="manual-added-contacts"></div>
+                            </div>
+                            
+                            <!-- Load More -->
+                            <div class="contact-browser-footer" id="contact-browser-footer" style="display: none;">
+                                <button type="button" class="btn btn-sm btn-outline" id="load-more-contacts-btn">
+                                    <i class="fas fa-arrow-down"></i> Load More
+                                </button>
+                                <span class="text-muted">Showing <span id="showing-count">0</span> of <span id="total-available-count">0</span></span>
                             </div>
                         </div>
                         
-                        <!-- Right: Contact Preview -->
-                        <div class="campaign-contacts-preview">
-                            <div class="contacts-preview-header">
+                        <!-- Right: Selected Contacts -->
+                        <div class="selected-contacts-panel">
+                            <div class="selected-contacts-header">
                                 <h4><i class="fas fa-users"></i> Campaign Contacts</h4>
-                                <div class="campaign-preview-count" id="campaign-preview-count">
-                                    <span class="preview-count-number" id="preview-count-number">0</span>
-                                    <span class="preview-count-label">total</span>
+                                <div class="selected-count-badge" id="selected-count-badge">
+                                    <span id="selected-count">0</span>
                                 </div>
                             </div>
                             
-                            <!-- Manually Added Contacts (if any) -->
-                            <div class="manual-contacts-section" id="manual-contacts-section" style="display: none;">
-                                <div class="manual-contacts-header">
-                                    <span><i class="fas fa-user-plus"></i> Manually Added (<span id="manual-count">0</span>)</span>
+                            <!-- Selected Actions -->
+                            <div class="selected-contacts-actions">
+                                <input type="text" id="selected-search" placeholder="Search selected...">
+                                <button type="button" class="btn btn-sm btn-danger" id="clear-all-selected-btn" style="display: none;">
+                                    <i class="fas fa-trash"></i> Clear All
+                                </button>
+                            </div>
+                            
+                            <!-- Selected List -->
+                            <div class="selected-contacts-list" id="selected-contacts-list">
+                                <div class="selected-empty-state">
+                                    <i class="fas fa-user-plus"></i>
+                                    <p>No contacts selected</p>
+                                    <small>Click + to add contacts from the left panel</small>
                                 </div>
-                                <div class="manual-contacts-list" id="manual-contacts-list"></div>
-                            </div>
-                            
-                            <!-- Filtered Contacts Header -->
-                            <div class="filtered-contacts-header" id="filtered-contacts-header">
-                                <span><i class="fas fa-filter"></i> From Filters (<span id="filtered-count">0</span>)</span>
-                            </div>
-                            
-                            <!-- Overlap Warning -->
-                            <div class="campaign-overlap-warning" id="campaign-overlap-warning" style="display: none;">
-                                <i class="fas fa-exclamation-triangle"></i>
-                                <span id="campaign-overlap-text"></span>
-                                <div class="overlap-actions">
-                                    <button class="btn btn-sm btn-secondary" id="campaign-exclude-overlap">Exclude them</button>
-                                    <button class="btn btn-sm btn-primary" id="campaign-include-overlap">Include anyway</button>
-                                </div>
-                            </div>
-                            
-                            <!-- Contact List Preview -->
-                            <div class="contacts-preview-list" id="contacts-preview-list">
-                                <div class="loading-spinner">
-                                    <i class="fas fa-spinner fa-spin"></i> Apply filters to see matching contacts...
-                                </div>
-                            </div>
-                            
-                            <div class="contacts-preview-footer" id="contacts-preview-footer" style="display: none;">
-                                <span class="text-muted">Showing first 50 of <span id="total-contacts-count">0</span> filtered contacts</span>
                             </div>
                         </div>
                     </div>

@@ -1204,8 +1204,10 @@ def preview_enrollment():
     """Preview contacts that would be enrolled based on filters"""
     data = request.get_json()
     filter_criteria = data.get('filter_criteria', {})
+    limit = data.get('limit', 50)
+    offset = data.get('offset', 0)
     
-    count, sample = campaign_service.preview_enrollment(filter_criteria)
+    count, sample = campaign_service.preview_enrollment(filter_criteria, limit=limit, offset=offset)
     
     return jsonify({
         'success': True,
