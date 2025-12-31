@@ -2291,6 +2291,55 @@ function renderMessageSequence(messages, messageStats) {
     return messages.map((msg, index) => {
         const stats = statsMap[msg.id] || {};
         const statusClass = stats.sent > 0 ? 'sent' : 'pending';
+        const abTest = msg.ab_test;
+        
+        // Build A/B test results panel if this message has A/B testing
+        let abTestPanel = '';
+        if (msg.has_ab_test && abTest) {
+            const aRate = abTest.variant_a_response_rate || 0;
+            const bRate = abTest.variant_b_response_rate || 0;
+            const maxRate = Math.max(aRate, bRate, 1); // Avoid divide by zero
+            const aWidth = (aRate / maxRate) * 100;
+            const bWidth = (bRate / maxRate) * 100;
+            
+            abTestPanel = `
+                <div class="ab-test-results">
+                    <div class="ab-test-header">
+                        <i class="fas fa-vial"></i> A/B Test Results
+                    </div>
+                    <div class="ab-test-variants">
+                        <div class="ab-variant-card ${abTest.winner === 'A' ? 'winner' : ''}">
+                            <div class="ab-variant-label">
+                                VARIANT A ${abTest.winner === 'A' ? '<span class="ab-winner-badge">✓ WINNER</span>' : ''}
+                            </div>
+                            <div class="ab-variant-text">"${escapeHtml(msg.message_body.substring(0, 80))}${msg.message_body.length > 80 ? '...' : ''}"</div>
+                            <div class="ab-variant-stats">
+                                <div class="ab-stat"><i class="fas fa-paper-plane"></i> ${abTest.variant_a_sent || 0} sent</div>
+                                <div class="ab-stat"><i class="fas fa-reply"></i> ${abTest.variant_a_responses || 0} responses</div>
+                            </div>
+                            <div class="ab-rate-bar">
+                                <div class="ab-rate-fill" style="width: ${aWidth}%"></div>
+                            </div>
+                            <div class="ab-rate-value">${aRate}% response rate</div>
+                        </div>
+                        <div class="ab-variant-card ${abTest.winner === 'B' ? 'winner' : ''}">
+                            <div class="ab-variant-label">
+                                VARIANT B ${abTest.winner === 'B' ? '<span class="ab-winner-badge">✓ WINNER</span>' : ''}
+                            </div>
+                            <div class="ab-variant-text">"${escapeHtml(abTest.variant_b_body.substring(0, 80))}${abTest.variant_b_body.length > 80 ? '...' : ''}"</div>
+                            <div class="ab-variant-stats">
+                                <div class="ab-stat"><i class="fas fa-paper-plane"></i> ${abTest.variant_b_sent || 0} sent</div>
+                                <div class="ab-stat"><i class="fas fa-reply"></i> ${abTest.variant_b_responses || 0} responses</div>
+                            </div>
+                            <div class="ab-rate-bar">
+                                <div class="ab-rate-fill variant-b" style="width: ${bWidth}%"></div>
+                            </div>
+                            <div class="ab-rate-value">${bRate}% response rate</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
         
         return `
             <div class="message-sequence-item">
@@ -2311,6 +2360,7 @@ function renderMessageSequence(messages, messageStats) {
                         <span class="message-sequence-stat"><i class="fas fa-reply"></i> ${stats.responses || 0} responses</span>
                         ${msg.enable_followup ? `<span class="message-sequence-stat"><i class="fas fa-redo"></i> ${stats.followups_sent || 0} follow-ups</span>` : ''}
                     </div>
+                    ${abTestPanel}
                 </div>
             </div>
         `;

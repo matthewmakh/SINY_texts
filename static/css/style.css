@@ -2369,6 +2369,119 @@ body {
     margin-left: 8px;
 }
 
+/* A/B Test Results Panel */
+.ab-test-results {
+    margin-top: 16px;
+    padding: 16px;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+
+.ab-test-header {
+    font-weight: 600;
+    color: #1e40af;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ab-test-variants {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.ab-variant-card {
+    background: white;
+    border-radius: 8px;
+    padding: 14px;
+    border: 2px solid #e2e8f0;
+    transition: all 0.2s ease;
+}
+
+.ab-variant-card.winner {
+    border-color: #22c55e;
+    background: #f0fdf4;
+}
+
+.ab-variant-label {
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: #64748b;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ab-winner-badge {
+    background: #22c55e;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.ab-variant-text {
+    font-size: 0.85rem;
+    color: #334155;
+    margin-bottom: 12px;
+    font-style: italic;
+    line-height: 1.4;
+    max-height: 60px;
+    overflow: hidden;
+}
+
+.ab-variant-stats {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 10px;
+}
+
+.ab-stat {
+    font-size: 0.8rem;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ab-rate-bar {
+    height: 8px;
+    background: #e2e8f0;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+
+.ab-rate-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.ab-rate-fill.variant-b {
+    background: linear-gradient(90deg, #8b5cf6, #6d28d9);
+}
+
+.ab-variant-card.winner .ab-rate-fill {
+    background: linear-gradient(90deg, #22c55e, #16a34a);
+}
+
+.ab-rate-value {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.ab-variant-card.winner .ab-rate-value {
+    color: #16a34a;
+}
+
 /* Campaign Wizard */
 .wizard-steps {
     display: flex;
