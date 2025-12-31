@@ -2136,6 +2136,10 @@ function renderCampaignsList(campaigns) {
                                 <i class="fas fa-play"></i> Resume
                             </button>
                         ` : ''}
+                        <button class="btn btn-sm btn-danger" onclick="deleteCampaign(${campaign.id}, '${escapeHtml(campaign.name).replace(/'/g, "\\'")}')"
+                            title="Delete campaign">
+                            <i class="fas fa-trash"></i>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -2204,6 +2208,10 @@ function renderCampaignDetail(campaign, stats) {
                         <i class="fas fa-play"></i> Resume
                     </button>
                 ` : ''}
+                <button class="btn btn-danger" onclick="deleteCampaign(${campaign.id}, '${escapeHtml(campaign.name).replace(/'/g, "\\'")}')"
+                    title="Delete campaign">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
             </div>
         </div>
         
@@ -2359,6 +2367,39 @@ async function resumeCampaign(campaignId) {
         }
     } catch (e) {
         showToast('Error resuming campaign', 'error');
+    }
+}
+
+async function deleteCampaign(campaignId, campaignName) {
+    // Show confirmation dialog
+    const confirmed = confirm(`⚠️ DELETE CAMPAIGN\n\nAre you sure you want to delete "${campaignName}"?\n\nThis will:\n• Remove all enrolled contacts from this campaign\n• Delete all campaign messages\n• Delete all send history\n\nThis action CANNOT be undone.`);
+    
+    if (!confirmed) {
+        return;
+    }
+    
+    // Double confirm for active campaigns
+    const detailContainer = document.getElementById('campaign-detail-container');
+    const isDetailView = detailContainer && detailContainer.style.display !== 'none';
+    
+    try {
+        const result = await API.delete(`/campaigns/${campaignId}`);
+        if (result.success) {
+            showToast('Campaign deleted successfully', 'success');
+            
+            // If we're in detail view, go back to list
+            if (isDetailView) {
+                document.getElementById('campaign-detail-container').style.display = 'none';
+                document.getElementById('campaigns-list-container').style.display = 'block';
+            }
+            
+            loadCampaigns();
+        } else {
+            showToast(result.error || 'Failed to delete campaign', 'error');
+        }
+    } catch (e) {
+        showToast('Error deleting campaign', 'error');
+        console.error('Delete campaign error:', e);
     }
 }
 
