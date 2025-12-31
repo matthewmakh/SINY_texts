@@ -301,12 +301,12 @@ def get_all_contacts(search: str = None, mobile_only: bool = True, source: str =
                      permit_status: str = None, bldg_type: str = None, residential: str = None,
                      filing_status: str = None, zip: str = None, **kwargs):
     """
-    Get contacts from both permit contacts and owner contacts.
+    Get contacts from permit contacts, owner contacts, AND manual contacts.
     
     Args:
         search: Search term
         mobile_only: Only return mobile numbers (for permit contacts)
-        source: 'permit', 'owner', or 'all'
+        source: 'permit', 'owner', 'manual', or 'all'
         limit: Max results
         offset: Pagination offset
         borough: Filter by borough (MANHATTAN, BROOKLYN, etc.)
@@ -320,6 +320,8 @@ def get_all_contacts(search: str = None, mobile_only: bool = True, source: str =
         bldg_type: Filter by building type (1, 2)
         residential: Filter by residential (YES)
     """
+    from database import get_session, ManualContact
+    
     # Handle aliases
     if filing_status and not permit_status:
         permit_status = filing_status
@@ -327,6 +329,40 @@ def get_all_contacts(search: str = None, mobile_only: bool = True, source: str =
         zip_code = zip
     
     contacts = []
+    
+    # Get manual contacts from local database
+    if source in ['all', 'manual']:
+        session = get_session()
+        try:
+            query = session.query(ManualContact)
+            
+            if search:
+                search_term = f"%{search}%"
+                query = query.filter(
+                    (ManualContact.name.ilike(search_term)) |
+                    (ManualContact.phone_number.ilike(search_term)) |
+                    (ManualContact.company.ilike(search_term))
+                )
+            
+            # Role filter for manual contacts
+            if role:
+                query = query.filter(ManualContact.role.ilike(f"%{role}%"))
+            
+            manual_contacts = query.all()
+            
+            for mc in manual_contacts:
+                contacts.append({
+                    'id': f"manual_{mc.id}",
+                    'name': mc.name or 'Unknown',
+                    'phone': mc.phone_number,
+                    'phone_normalized': mc.phone_number,
+                    'role': mc.role or 'Manual',
+                    'company': mc.company,
+                    'borough': '',  # Manual contacts don't have borough
+                    'source': 'manual'
+                })
+        finally:
+            session.close()
     
     if source in ['all', 'permit']:
         permit_contacts = search_contacts(
@@ -344,10 +380,13 @@ def get_all_contacts(search: str = None, mobile_only: bool = True, source: str =
     seen_phones = set()
     unique_contacts = []
     for c in contacts:
-        phone = c.get('phone')
-        if phone and phone not in seen_phones:
-            seen_phones.add(phone)
-            unique_contacts.append(c)
+        phone = c.get('phone') or c.get('phone_normalized')
+        # Normalize for deduplication
+        if phone:
+            normalized = ''.join(d for d in str(phone) if d.isdigit())[-10:]
+            if normalized and normalized not in seen_phones:
+                seen_phones.add(normalized)
+                unique_contacts.append(c)
     
     return unique_contacts[:limit]
 
