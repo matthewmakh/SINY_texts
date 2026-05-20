@@ -31,7 +31,23 @@ class Config:
     
     # Webhook
     WEBHOOK_BASE_URL = os.getenv('WEBHOOK_BASE_URL', 'http://localhost:5000')
-    
+
+    # Public base URL for tracking pixels / click redirects / unsubscribe links / OAuth callback
+    # Falls back to WEBHOOK_BASE_URL if not set explicitly.
+    PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL') or os.getenv('WEBHOOK_BASE_URL', 'http://localhost:5000')
+
+    # Google OAuth — for connecting Gmail / Workspace mailboxes (Instantly-style rotation)
+    GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
+    GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
+    GOOGLE_OAUTH_REDIRECT_URI = os.getenv(
+        'GOOGLE_OAUTH_REDIRECT_URI',
+        f"{PUBLIC_BASE_URL.rstrip('/')}/api/email/oauth/callback"
+    )
+
+    # Anthropic API — for AI personalization on email campaigns
+    ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+    ANTHROPIC_MODEL = os.getenv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
+
     @classmethod
     def validate(cls):
         """Validate required configuration on startup"""

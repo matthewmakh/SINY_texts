@@ -5,6 +5,7 @@ from dateutil.rrule import rrule, DAILY, WEEKLY, MONTHLY, MO, TU, WE, TH, FR, SA
 from zoneinfo import ZoneInfo
 import logging
 import json
+import random
 import re
 
 from database import (
@@ -60,9 +61,30 @@ class MessageScheduler:
             id='check_campaign_followups',
             replace_existing=True
         )
+        # Email campaign processing — queue + send loop
+        self.scheduler.add_job(
+            func=self._process_email_campaigns,
+            trigger=IntervalTrigger(seconds=60),
+            id='process_email_campaigns',
+            replace_existing=True
+        )
+        self.scheduler.add_job(
+            func=self._drain_email_send_queue,
+            trigger=IntervalTrigger(seconds=20),
+            id='drain_email_queue',
+            replace_existing=True
+        )
+        # Reply polling — check connected Gmail inboxes for new replies
+        self.scheduler.add_job(
+            func=self._poll_email_replies,
+            trigger=IntervalTrigger(seconds=120),
+            id='poll_email_replies',
+            replace_existing=True
+        )
         self.scheduler.start()
         logger.info("Message scheduler started - checking for due messages every 30 seconds")
         logger.info("Campaign scheduler started - checking campaigns and follow-ups every 60 seconds")
+        logger.info("Email scheduler started - processing campaigns every 60s, queue every 20s, replies every 120s")
         logger.info(f"SAFETY: Max recipients per scheduled message: {MAX_RECIPIENTS_PER_SCHEDULE}")
     
     def _calculate_next_occurrence(self, bulk_msg):
@@ -805,6 +827,242 @@ class MessageScheduler:
         finally:
             session.close()
     
+    # =========================================================================
+    # EMAIL CAMPAIGN SCHEDULING
+    # =========================================================================
+
+    def _email_in_send_window(self, campaign) -> bool:
+        """True if right now (in campaign tz) is within the configured send window + day."""
+        try:
+            tz = ZoneInfo(campaign.timezone or 'America/New_York')
+        except Exception:
+            tz = ZoneInfo('America/New_York')
+        now = datetime.now(tz)
+
+        # Day check
+        days = [d.strip().lower() for d in (campaign.send_days or '').split(',') if d.strip()]
+        if days:
+            weekday = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][now.weekday()]
+            if weekday not in days:
+                return False
+
+        # Window check
+        try:
+            sh, sm = [int(x) for x in (campaign.send_window_start or '09:00').split(':')]
+            eh, em = [int(x) for x in (campaign.send_window_end or '17:00').split(':')]
+        except Exception:
+            sh, sm, eh, em = 9, 0, 17, 0
+        start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+        end = now.replace(hour=eh, minute=em, second=0, microsecond=0)
+        return start <= now <= end
+
+    def _process_email_campaigns(self):
+        """
+        For each active email campaign, enqueue EmailSend rows for enrollments
+        whose next step is due. Actual sending happens in _drain_email_send_queue
+        so we can apply per-inbox jitter & caps independently.
+        """
+        from database import EmailCampaign, EmailCampaignMessage, EmailEnrollment, EmailSend, EmailUnsubscribe
+        from email_service import render_personalization, generate_ai_first_line
+
+        session = get_session()
+        try:
+            campaigns = session.query(EmailCampaign).filter(
+                EmailCampaign.status == CampaignStatus.ACTIVE.value
+            ).all()
+
+            for campaign in campaigns:
+                if not self._email_in_send_window(campaign):
+                    continue
+
+                messages = session.query(EmailCampaignMessage).filter(
+                    EmailCampaignMessage.campaign_id == campaign.id
+                ).order_by(EmailCampaignMessage.sequence_order).all()
+                if not messages:
+                    continue
+
+                enrollments = session.query(EmailEnrollment).filter(
+                    EmailEnrollment.campaign_id == campaign.id,
+                    EmailEnrollment.status == EnrollmentStatus.ACTIVE.value,
+                    EmailEnrollment.first_reply_at.is_(None),
+                    EmailEnrollment.bounced_at.is_(None),
+                    EmailEnrollment.unsubscribed_at.is_(None),
+                ).all()
+
+                # Suppression cache
+                unsubs = {u.email for u in session.query(EmailUnsubscribe).all()}
+
+                now = datetime.utcnow()
+                all_complete = True
+
+                for enrollment in enrollments:
+                    if enrollment.email in unsubs:
+                        enrollment.status = 'unsubscribed'
+                        enrollment.unsubscribed_at = now
+                        continue
+
+                    next_step = enrollment.current_step + 1
+                    if next_step > len(messages):
+                        enrollment.status = EnrollmentStatus.COMPLETED.value
+                        continue
+                    all_complete = False
+
+                    next_msg = messages[next_step - 1]
+
+                    # Timing check
+                    if next_step == 1:
+                        ready = enrollment.next_send_at is None or enrollment.next_send_at <= now
+                    else:
+                        if not enrollment.last_sent_at:
+                            continue
+                        days_since = (now - enrollment.last_sent_at).total_seconds() / 86400
+                        ready = days_since >= (next_msg.days_after_previous or 0)
+                    if not ready:
+                        continue
+
+                    # Skip if a pending send already exists for this step
+                    existing = session.query(EmailSend).filter(
+                        EmailSend.enrollment_id == enrollment.id,
+                        EmailSend.message_id == next_msg.id,
+                        EmailSend.status.in_(['pending', 'sent'])
+                    ).first()
+                    if existing:
+                        continue
+
+                    # AI personalization (lazy — once per enrollment)
+                    if campaign.ai_personalization and not enrollment.ai_first_line:
+                        try:
+                            import json as _json
+                            extra = _json.loads(enrollment.extra_data) if enrollment.extra_data else {}
+                            ctx = {
+                                'name': enrollment.name,
+                                'company': enrollment.company,
+                                'email': enrollment.email,
+                                **extra,
+                            }
+                            opener = generate_ai_first_line(campaign.ai_prompt, ctx)
+                            if opener:
+                                enrollment.ai_first_line = opener
+                                enrollment.ai_generated_at = now
+                        except Exception as ai_e:
+                            logger.warning(f"AI personalization failed for enrollment {enrollment.id}: {ai_e}")
+
+                    # Render subject + body
+                    subject = next_msg.subject
+                    if next_msg.has_ab_test and enrollment.ab_variant == 'B' and next_msg.subject_variant_b:
+                        subject = next_msg.subject_variant_b
+                    rendered_subject = render_personalization(subject, enrollment)
+                    rendered_html = render_personalization(next_msg.body_html, enrollment)
+                    rendered_text = render_personalization(next_msg.body_text, enrollment) if next_msg.body_text else None
+
+                    send = EmailSend(
+                        campaign_id=campaign.id,
+                        message_id=next_msg.id,
+                        enrollment_id=enrollment.id,
+                        to_email=enrollment.email,
+                        from_email='',  # filled at send time
+                        subject=rendered_subject,
+                        body_html=rendered_html,
+                        body_text=rendered_text,
+                        ab_variant=enrollment.ab_variant,
+                        status='pending',
+                        scheduled_for=now,
+                    )
+                    session.add(send)
+
+                if all_complete and enrollments:
+                    campaign.status = CampaignStatus.COMPLETED.value
+                    campaign.completed_at = now
+                    logger.info(f"Email campaign {campaign.id} completed - all enrollments done")
+
+            session.commit()
+        except Exception as e:
+            logger.exception(f"Error in _process_email_campaigns: {e}")
+            session.rollback()
+        finally:
+            session.close()
+
+    def _drain_email_send_queue(self):
+        """
+        Send pending EmailSend rows, respecting per-inbox jitter & daily caps.
+        Picks at most one send per inbox per tick — jitter is enforced by the
+        inbox's last_send_at + min_delay_seconds.
+        """
+        from database import EmailCampaign, EmailSend, EmailAccount, EmailAccountStatus
+        from email_service import send_campaign_step, pick_sending_account
+
+        session = get_session()
+        send_ids = []
+        try:
+            pending = session.query(EmailSend).filter(
+                EmailSend.status == 'pending'
+            ).order_by(EmailSend.created_at.asc()).limit(200).all()
+
+            if not pending:
+                return
+
+            # Snapshot accounts and figure out who's available
+            now = datetime.utcnow()
+            campaigns_cache = {}
+            inbox_used_this_tick = set()
+
+            for s in pending:
+                campaign = campaigns_cache.get(s.campaign_id)
+                if campaign is None:
+                    campaign = session.query(EmailCampaign).filter(EmailCampaign.id == s.campaign_id).first()
+                    campaigns_cache[s.campaign_id] = campaign
+                if not campaign or campaign.status != CampaignStatus.ACTIVE.value:
+                    continue
+                if not self._email_in_send_window(campaign):
+                    continue
+
+                account = pick_sending_account(campaign, session)
+                if not account:
+                    continue
+                if account.id in inbox_used_this_tick:
+                    # Enforce one send per inbox per tick (20s tick + min_delay handles deeper jitter)
+                    continue
+
+                # Jitter floor: don't send if account's last send was too recent
+                if account.last_send_at:
+                    elapsed = (now - account.last_send_at).total_seconds()
+                    min_delay = random.randint(
+                        account.min_delay_seconds or 30,
+                        max(account.max_delay_seconds or 60, account.min_delay_seconds or 30)
+                    )
+                    if elapsed < min_delay:
+                        continue
+
+                s.account_id = account.id
+                inbox_used_this_tick.add(account.id)
+                send_ids.append(s.id)
+
+            session.commit()
+        except Exception as e:
+            logger.exception(f"Error scheduling email sends: {e}")
+            session.rollback()
+            return
+        finally:
+            session.close()
+
+        # Actually send (outside the queueing session so each send manages its own transaction)
+        for sid in send_ids:
+            try:
+                from email_service import send_campaign_step as _send
+                _send(sid)
+            except Exception as e:
+                logger.error(f"send_campaign_step({sid}) failed: {e}")
+
+    def _poll_email_replies(self):
+        """Poll all connected Gmail accounts for new replies."""
+        try:
+            from email_service import poll_replies_all_accounts
+            count = poll_replies_all_accounts()
+            if count:
+                logger.info(f"Email reply poll: {count} new replies recorded")
+        except Exception as e:
+            logger.error(f"Email reply poll failed: {e}")
+
     def shutdown(self):
         """Shutdown the scheduler"""
         self.scheduler.shutdown()

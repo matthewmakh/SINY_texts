@@ -1,6 +1,7 @@
 from datetime import datetime
 import signal
 import sys
+import json
 import logging
 import csv
 import io
@@ -1323,6 +1324,531 @@ def complete_campaign(campaign_id):
         return jsonify({'success': True, 'campaign': campaign})
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
+
+
+# =============================================================================
+# EMAIL API (Instantly-style cold email)
+# =============================================================================
+
+from email_campaign_service import email_campaign_service
+from email_service import (
+    build_oauth_url, connect_account_from_code,
+    add_unsubscribe, is_unsubscribed,
+    poll_replies_for_account, GMAIL_SCOPES,
+)
+from database import (
+    EmailAccount, EmailAccountStatus,
+    EmailCampaign, EmailCampaignMessage, EmailEnrollment, EmailSend,
+    EmailEvent, EmailUnsubscribe, EmailReply,
+)
+import secrets as _secrets
+
+
+# ---- Email Accounts (OAuth) ----
+
+@app.route('/api/email/accounts', methods=['GET'])
+@login_required
+def list_email_accounts():
+    """List connected sending mailboxes."""
+    session = get_session()
+    try:
+        accounts = session.query(EmailAccount).order_by(EmailAccount.created_at.desc()).all()
+        return jsonify({'success': True, 'accounts': [a.to_dict() for a in accounts]})
+    finally:
+        session.close()
+
+
+@app.route('/api/email/accounts/<int:account_id>', methods=['DELETE'])
+@login_required
+def delete_email_account(account_id):
+    """Disconnect a mailbox."""
+    session = get_session()
+    try:
+        a = session.query(EmailAccount).filter(EmailAccount.id == account_id).first()
+        if not a:
+            return jsonify({'success': False, 'error': 'Not found'}), 404
+        session.delete(a)
+        session.commit()
+        return jsonify({'success': True})
+    finally:
+        session.close()
+
+
+@app.route('/api/email/accounts/<int:account_id>', methods=['PUT'])
+@login_required
+def update_email_account(account_id):
+    """Update sending policy (daily cap, jitter, status) on an account."""
+    data = request.json or {}
+    session = get_session()
+    try:
+        a = session.query(EmailAccount).filter(EmailAccount.id == account_id).first()
+        if not a:
+            return jsonify({'success': False, 'error': 'Not found'}), 404
+        for f in ('daily_cap', 'min_delay_seconds', 'max_delay_seconds', 'display_name', 'status'):
+            if f in data:
+                setattr(a, f, data[f])
+        session.commit()
+        return jsonify({'success': True, 'account': a.to_dict()})
+    finally:
+        session.close()
+
+
+@app.route('/api/email/oauth/start', methods=['GET'])
+@login_required
+def email_oauth_start():
+    """Return the Google consent URL for connecting a new Gmail/Workspace account."""
+    if not Config.GOOGLE_CLIENT_ID:
+        return jsonify({
+            'success': False,
+            'error': 'GOOGLE_CLIENT_ID not configured on the server'
+        }), 400
+    state = _secrets.token_urlsafe(24)
+    # Store state in a short-lived signed cookie (lightweight CSRF protection)
+    url = build_oauth_url(state)
+    resp = make_response(jsonify({'success': True, 'url': url, 'state': state}))
+    resp.set_cookie('email_oauth_state', state, httponly=True, secure=True, samesite='Lax', max_age=600)
+    return resp
+
+
+@app.route('/api/email/oauth/callback', methods=['GET'])
+def email_oauth_callback():
+    """Google redirects here after consent. Persists the connected account."""
+    code = request.args.get('code')
+    state = request.args.get('state')
+    cookie_state = request.cookies.get('email_oauth_state')
+    error = request.args.get('error')
+
+    if error:
+        return f'<h2>OAuth error: {error}</h2><a href="/">Back</a>', 400
+    if not code:
+        return '<h2>Missing authorization code</h2>', 400
+    if not state or state != cookie_state:
+        return '<h2>State mismatch — restart the OAuth flow</h2>', 400
+
+    try:
+        account = connect_account_from_code(code)
+        return f'''<!DOCTYPE html><html><head><title>Connected</title>
+<style>body{{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f7}}
+.card{{background:white;padding:48px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.08);text-align:center;max-width:420px}}
+h1{{margin:0 0 8px;font-size:22px}}p{{color:#555}}a{{display:inline-block;margin-top:16px;padding:10px 20px;background:#007aff;color:white;text-decoration:none;border-radius:6px}}</style>
+</head><body><div class="card"><h1>✓ {account["email"]} connected</h1>
+<p>You can now use this mailbox to send email campaigns. Daily cap defaults to {account["daily_cap"]}.</p>
+<a href="/#email-accounts" onclick="window.opener && window.opener.location.reload(); window.close(); return true;">Back to dashboard</a>
+</div></body></html>'''
+    except Exception as e:
+        logger.exception("OAuth callback failed")
+        return f'<h2>Connect failed:</h2><pre>{e}</pre>', 500
+
+
+@app.route('/api/email/accounts/<int:account_id>/poll', methods=['POST'])
+@login_required
+def force_poll_account(account_id):
+    """Manually trigger a reply poll for a single account (useful during testing)."""
+    try:
+        count = poll_replies_for_account(account_id)
+        return jsonify({'success': True, 'new_replies': count})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ---- Email Campaigns ----
+
+@app.route('/api/email/campaigns', methods=['GET'])
+@login_required
+def list_email_campaigns():
+    status = request.args.get('status')
+    campaigns = email_campaign_service.list_campaigns(status=status, include_stats=True)
+    return jsonify({'success': True, 'campaigns': campaigns})
+
+
+@app.route('/api/email/campaigns', methods=['POST'])
+@login_required
+def create_email_campaign():
+    from flask import g
+    data = request.json or {}
+    if not data.get('name'):
+        return jsonify({'success': False, 'error': 'name required'}), 400
+    campaign = email_campaign_service.create_campaign(
+        name=data['name'],
+        description=data.get('description'),
+        enrollment_type=data.get('enrollment_type', 'snapshot'),
+        filter_criteria=data.get('filter_criteria'),
+        send_window_start=data.get('send_window_start', '09:00'),
+        send_window_end=data.get('send_window_end', '17:00'),
+        send_days=data.get('send_days', 'mon,tue,wed,thu,fri'),
+        sending_account_ids=data.get('sending_account_ids'),
+        rotation_strategy=data.get('rotation_strategy', 'round_robin'),
+        ai_personalization=bool(data.get('ai_personalization')),
+        ai_prompt=data.get('ai_prompt'),
+        track_opens=data.get('track_opens', True),
+        track_clicks=data.get('track_clicks', True),
+        created_by=getattr(g, 'current_user', {}).get('id') if hasattr(g, 'current_user') else None,
+    )
+    return jsonify({'success': True, 'campaign': campaign})
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>', methods=['GET'])
+@login_required
+def get_email_campaign(campaign_id):
+    c = email_campaign_service.get_campaign(campaign_id, include_stats=True)
+    if not c:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+    return jsonify({'success': True, 'campaign': c})
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>', methods=['PUT'])
+@login_required
+def update_email_campaign(campaign_id):
+    c = email_campaign_service.update_campaign(campaign_id, **(request.json or {}))
+    if not c:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+    return jsonify({'success': True, 'campaign': c})
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>', methods=['DELETE'])
+@login_required
+def delete_email_campaign(campaign_id):
+    ok = email_campaign_service.delete_campaign(campaign_id)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>/messages', methods=['POST'])
+@login_required
+def add_email_message(campaign_id):
+    data = request.json or {}
+    if not data.get('subject') or not data.get('body_html'):
+        return jsonify({'success': False, 'error': 'subject and body_html required'}), 400
+    msg = email_campaign_service.add_message(
+        campaign_id=campaign_id,
+        subject=data['subject'],
+        body_html=data['body_html'],
+        preheader=data.get('preheader'),
+        body_text=data.get('body_text'),
+        days_after_previous=data.get('days_after_previous', 0),
+        same_thread=data.get('same_thread', True),
+        sequence_order=data.get('sequence_order'),
+        subject_variant_b=data.get('subject_variant_b'),
+    )
+    if not msg:
+        return jsonify({'success': False, 'error': 'Campaign not found'}), 404
+    return jsonify({'success': True, 'message': msg})
+
+
+@app.route('/api/email/messages/<int:message_id>', methods=['PUT'])
+@login_required
+def update_email_message(message_id):
+    msg = email_campaign_service.update_message(message_id, **(request.json or {}))
+    if not msg:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+    return jsonify({'success': True, 'message': msg})
+
+
+@app.route('/api/email/messages/<int:message_id>', methods=['DELETE'])
+@login_required
+def delete_email_message(message_id):
+    try:
+        ok = email_campaign_service.delete_message(message_id)
+        return jsonify({'success': ok})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>/enroll', methods=['POST'])
+@login_required
+def enroll_email_contacts(campaign_id):
+    """
+    Enroll contacts. Body options:
+      - {"contacts": [{"email": "...", "name": "...", "company": "...", ...}, ...]}
+      - {"filter_criteria": {...}}  to fetch from owner_contacts in leads DB
+    """
+    data = request.json or {}
+    contacts = data.get('contacts') or []
+
+    if data.get('use_filters') or data.get('filter_criteria'):
+        from leads_service import get_leads_engine
+        from sqlalchemy import text as _text
+        try:
+            engine = get_leads_engine()
+            with engine.connect() as conn:
+                # Pull from owner_contacts.email
+                rows = conn.execute(_text("""
+                    SELECT owner_name AS name, email, phone, source
+                    FROM owner_contacts
+                    WHERE email IS NOT NULL AND email != ''
+                    ORDER BY created_at DESC
+                    LIMIT 5000
+                """)).fetchall()
+            for r in rows:
+                d = dict(r._mapping)
+                contacts.append({
+                    'email': d.get('email'),
+                    'name': d.get('name'),
+                    'phone': d.get('phone'),
+                    'source': d.get('source'),
+                })
+        except Exception as e:
+            logger.warning(f"Failed to pull owner_contacts emails: {e}")
+
+    count = email_campaign_service.enroll_contacts(campaign_id, contacts)
+    return jsonify({'success': True, 'enrolled': count})
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>/enrollments', methods=['GET'])
+@login_required
+def list_email_enrollments(campaign_id):
+    status = request.args.get('status')
+    limit = request.args.get('limit', 100, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    enrollments, total = email_campaign_service.get_enrollments(campaign_id, status, limit, offset)
+    return jsonify({'success': True, 'enrollments': enrollments, 'total': total})
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>/start', methods=['POST'])
+@login_required
+def start_email_campaign(campaign_id):
+    try:
+        return jsonify({'success': True, 'campaign': email_campaign_service.start_campaign(campaign_id)})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>/pause', methods=['POST'])
+@login_required
+def pause_email_campaign(campaign_id):
+    try:
+        return jsonify({'success': True, 'campaign': email_campaign_service.pause_campaign(campaign_id)})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>/resume', methods=['POST'])
+@login_required
+def resume_email_campaign(campaign_id):
+    try:
+        return jsonify({'success': True, 'campaign': email_campaign_service.resume_campaign(campaign_id)})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>/complete', methods=['POST'])
+@login_required
+def complete_email_campaign(campaign_id):
+    try:
+        return jsonify({'success': True, 'campaign': email_campaign_service.complete_campaign(campaign_id)})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+# ---- Unified Inbox (replies) ----
+
+@app.route('/api/email/inbox', methods=['GET'])
+@login_required
+def email_inbox():
+    """Unified inbox of replies across all connected mailboxes."""
+    session = get_session()
+    try:
+        q = session.query(EmailReply).order_by(EmailReply.received_at.desc())
+        include_auto = request.args.get('include_auto', 'false').lower() == 'true'
+        if not include_auto:
+            q = q.filter(EmailReply.is_auto_reply == False)
+        campaign_id = request.args.get('campaign_id', type=int)
+        if campaign_id:
+            q = q.filter(EmailReply.campaign_id == campaign_id)
+        rows = q.limit(200).all()
+        return jsonify({'success': True, 'replies': [r.to_dict() for r in rows]})
+    finally:
+        session.close()
+
+
+@app.route('/api/email/inbox/<int:reply_id>/read', methods=['POST'])
+@login_required
+def mark_reply_read(reply_id):
+    session = get_session()
+    try:
+        r = session.query(EmailReply).filter(EmailReply.id == reply_id).first()
+        if not r:
+            return jsonify({'success': False, 'error': 'Not found'}), 404
+        r.read = True
+        session.commit()
+        return jsonify({'success': True})
+    finally:
+        session.close()
+
+
+# ---- Tracking endpoints (public, no auth) ----
+
+# 1x1 transparent GIF
+_PIXEL_GIF = bytes([
+    0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x21, 0xF9, 0x04, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+    0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3B
+])
+
+
+@app.route('/api/email/track/open/<send_token>.gif', methods=['GET'])
+def track_open(send_token):
+    """Open tracking pixel — public endpoint, returns 1x1 GIF."""
+    try:
+        send_id = int(send_token)
+        session = get_session()
+        try:
+            send = session.query(EmailSend).filter(EmailSend.id == send_id).first()
+            if send:
+                now = datetime.utcnow()
+                if not send.opened_at:
+                    send.opened_at = now
+                enrollment = session.query(EmailEnrollment).filter(EmailEnrollment.id == send.enrollment_id).first()
+                if enrollment:
+                    enrollment.open_count = (enrollment.open_count or 0) + 1
+                    if not enrollment.first_open_at:
+                        enrollment.first_open_at = now
+                ev = EmailEvent(
+                    send_id=send.id,
+                    enrollment_id=send.enrollment_id,
+                    campaign_id=send.campaign_id,
+                    event_type='open',
+                    metadata_json=json.dumps({
+                        'ua': request.headers.get('User-Agent', '')[:200],
+                        'ip': request.remote_addr,
+                    })
+                )
+                session.add(ev)
+                session.commit()
+        finally:
+            session.close()
+    except Exception as e:
+        logger.debug(f"open tracking error: {e}")
+
+    resp = make_response(_PIXEL_GIF)
+    resp.headers['Content-Type'] = 'image/gif'
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
+
+
+@app.route('/api/email/track/click/<send_token>', methods=['GET'])
+def track_click(send_token):
+    """Click tracking redirect."""
+    from flask import redirect
+    url = request.args.get('u', '/')
+    try:
+        send_id = int(send_token)
+        session = get_session()
+        try:
+            send = session.query(EmailSend).filter(EmailSend.id == send_id).first()
+            if send:
+                now = datetime.utcnow()
+                if not send.clicked_at:
+                    send.clicked_at = now
+                enrollment = session.query(EmailEnrollment).filter(EmailEnrollment.id == send.enrollment_id).first()
+                if enrollment:
+                    enrollment.click_count = (enrollment.click_count or 0) + 1
+                    if not enrollment.first_click_at:
+                        enrollment.first_click_at = now
+                ev = EmailEvent(
+                    send_id=send.id,
+                    enrollment_id=send.enrollment_id,
+                    campaign_id=send.campaign_id,
+                    event_type='click',
+                    url=url[:1000],
+                    metadata_json=json.dumps({
+                        'ua': request.headers.get('User-Agent', '')[:200],
+                        'ip': request.remote_addr,
+                    })
+                )
+                session.add(ev)
+                session.commit()
+        finally:
+            session.close()
+    except Exception as e:
+        logger.debug(f"click tracking error: {e}")
+    return redirect(url, code=302)
+
+
+@app.route('/api/email/unsubscribe/<token>', methods=['GET', 'POST'])
+def email_unsubscribe(token):
+    """One-click unsubscribe — supports List-Unsubscribe POST + browser GET."""
+    session = get_session()
+    try:
+        enrollment = session.query(EmailEnrollment).filter(EmailEnrollment.unsubscribe_token == token).first()
+        if not enrollment:
+            return '<h2>Invalid unsubscribe link</h2>', 404
+
+        enrollment.unsubscribed_at = datetime.utcnow()
+        enrollment.status = 'unsubscribed'
+        existing = session.query(EmailUnsubscribe).filter(EmailUnsubscribe.email == enrollment.email.lower()).first()
+        if not existing:
+            session.add(EmailUnsubscribe(
+                email=enrollment.email.lower(),
+                reason='one_click',
+                source_campaign_id=enrollment.campaign_id,
+            ))
+        ev = EmailEvent(
+            enrollment_id=enrollment.id,
+            campaign_id=enrollment.campaign_id,
+            event_type='unsubscribe',
+        )
+        session.add(ev)
+        session.commit()
+
+        return '''<!DOCTYPE html><html><head><title>Unsubscribed</title>
+<style>body{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f7}
+.card{background:white;padding:48px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.08);text-align:center;max-width:420px}
+h1{margin:0 0 8px;font-size:22px}p{color:#555}</style>
+</head><body><div class="card"><h1>You've been unsubscribed</h1>
+<p>You won't receive any more emails from us. Sorry to see you go.</p></div></body></html>'''
+    finally:
+        session.close()
+
+
+# ---- Email Dashboard ----
+
+@app.route('/api/email/stats', methods=['GET'])
+@login_required
+def email_dashboard_stats():
+    """High-level email metrics for the dashboard."""
+    session = get_session()
+    try:
+        from sqlalchemy import func as _func
+        total_campaigns = session.query(EmailCampaign).count()
+        active_campaigns = session.query(EmailCampaign).filter(EmailCampaign.status == 'active').count()
+        total_sends = session.query(EmailSend).filter(EmailSend.status == 'sent').count()
+        total_opens = session.query(EmailSend).filter(EmailSend.opened_at.isnot(None)).count()
+        total_replies = session.query(EmailSend).filter(EmailSend.replied_at.isnot(None)).count()
+        total_clicks = session.query(EmailSend).filter(EmailSend.clicked_at.isnot(None)).count()
+
+        accounts = session.query(EmailAccount).all()
+        account_summary = []
+        for a in accounts:
+            account_summary.append({
+                **a.to_dict(),
+                'remaining_today': max(0, (a.daily_cap or 0) - (a.sends_today if a.sends_today_date == datetime.utcnow().strftime('%Y-%m-%d') else 0)),
+            })
+
+        unread_replies = session.query(EmailReply).filter(
+            EmailReply.read == False,
+            EmailReply.is_auto_reply == False,
+        ).count()
+
+        return jsonify({
+            'success': True,
+            'stats': {
+                'total_campaigns': total_campaigns,
+                'active_campaigns': active_campaigns,
+                'total_sends': total_sends,
+                'total_opens': total_opens,
+                'total_clicks': total_clicks,
+                'total_replies': total_replies,
+                'open_rate': round((total_opens / total_sends * 100), 1) if total_sends else 0,
+                'click_rate': round((total_clicks / total_sends * 100), 1) if total_sends else 0,
+                'reply_rate': round((total_replies / total_sends * 100), 1) if total_sends else 0,
+                'unread_replies': unread_replies,
+            },
+            'accounts': account_summary,
+        })
+    finally:
+        session.close()
 
 
 # ============ Error Handlers ============

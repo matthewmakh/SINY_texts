@@ -352,6 +352,9 @@ async function loadViewData(view) {
         case 'campaigns':
             await loadCampaigns();
             break;
+        case 'email':
+            if (window.EmailModule) await window.EmailModule.load();
+            break;
         case 'scheduled':
             await loadScheduled();
             break;

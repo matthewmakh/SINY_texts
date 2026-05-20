@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SMS Dashboard - PNYC</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/email.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
@@ -54,6 +55,10 @@
                 </a>
                 <a href="#" class="nav-item" data-view="campaigns">
                     <i class="fas fa-bullhorn"></i> Campaigns
+                </a>
+                <a href="#" class="nav-item" data-view="email">
+                    <i class="fas fa-envelope-open-text"></i> Email
+                    <span class="nav-badge" id="email-unread-badge" style="display:none">0</span>
                 </a>
                 <a href="#" class="nav-item" data-view="scheduled">
                     <i class="fas fa-clock"></i> Scheduled
@@ -329,6 +334,187 @@
                 </div>
                 <div class="scheduled-list" id="scheduled-list"></div>
             </section>
+
+            <!-- Email View (Instantly-style cold email) -->
+            <section id="email-view" class="view">
+                <div class="view-header">
+                    <h2><i class="fas fa-envelope-open-text"></i> Email</h2>
+                    <div class="email-subnav">
+                        <button class="email-tab active" data-email-tab="overview"><i class="fas fa-chart-line"></i> Overview</button>
+                        <button class="email-tab" data-email-tab="campaigns"><i class="fas fa-rocket"></i> Campaigns</button>
+                        <button class="email-tab" data-email-tab="inbox"><i class="fas fa-inbox"></i> Inbox <span class="email-tab-badge" id="email-inbox-badge" style="display:none">0</span></button>
+                        <button class="email-tab" data-email-tab="accounts"><i class="fas fa-server"></i> Sending Accounts</button>
+                    </div>
+                </div>
+
+                <!-- Overview -->
+                <div class="email-pane active" id="email-pane-overview">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fas fa-paper-plane"></i></div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="email-stat-sent">0</span>
+                                <span class="stat-label">Sent</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fas fa-eye"></i></div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="email-stat-opens">0%</span>
+                                <span class="stat-label">Open Rate</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fas fa-reply"></i></div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="email-stat-replies">0%</span>
+                                <span class="stat-label">Reply Rate</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fas fa-mouse-pointer"></i></div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="email-stat-clicks">0%</span>
+                                <span class="stat-label">Click Rate</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="email-overview-grid">
+                        <div class="card">
+                            <h3>Sending Accounts</h3>
+                            <div id="email-account-summary" class="account-summary-list"></div>
+                            <button class="btn btn-secondary btn-sm" onclick="switchEmailTab('accounts')">Manage accounts</button>
+                        </div>
+                        <div class="card">
+                            <h3>Active Campaigns</h3>
+                            <div id="email-active-campaigns" class="active-campaigns-list"></div>
+                            <button class="btn btn-secondary btn-sm" onclick="switchEmailTab('campaigns')">View all campaigns</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Campaigns list + builder -->
+                <div class="email-pane" id="email-pane-campaigns">
+                    <div class="pane-header">
+                        <h3>Email Campaigns</h3>
+                        <button class="btn btn-primary" id="new-email-campaign-btn"><i class="fas fa-plus"></i> New Campaign</button>
+                    </div>
+                    <div id="email-campaigns-list" class="email-campaigns-list"></div>
+                    <div id="email-campaign-detail" style="display:none"></div>
+                </div>
+
+                <!-- Unified Inbox -->
+                <div class="email-pane" id="email-pane-inbox">
+                    <div class="pane-header">
+                        <h3>Replies</h3>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="email-include-auto"> Include auto-replies & bounces
+                        </label>
+                    </div>
+                    <div id="email-inbox-list" class="email-inbox-list"></div>
+                </div>
+
+                <!-- Sending Accounts -->
+                <div class="email-pane" id="email-pane-accounts">
+                    <div class="pane-header">
+                        <h3>Connected Sending Mailboxes</h3>
+                        <button class="btn btn-primary" id="connect-email-account-btn"><i class="fab fa-google"></i> Connect Gmail / Workspace</button>
+                    </div>
+                    <p class="muted">Connected mailboxes are rotated round-robin during campaigns. Each inbox has its own daily cap and jitter window. More inboxes = better deliverability.</p>
+                    <div id="email-accounts-list" class="email-accounts-list"></div>
+                </div>
+            </section>
+
+            <!-- Email Campaign Builder Modal -->
+            <div class="modal" id="email-campaign-modal">
+                <div class="modal-content modal-lg">
+                    <div class="modal-header">
+                        <h3 id="email-campaign-modal-title">New Email Campaign</h3>
+                        <button class="modal-close" onclick="hideModal('email-campaign-modal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="builder-step">
+                            <h4>1. Basics</h4>
+                            <div class="form-group">
+                                <label>Campaign Name</label>
+                                <input type="text" id="ec-name" placeholder="e.g. Q2 Brooklyn Owners">
+                            </div>
+                            <div class="form-group">
+                                <label>Description</label>
+                                <textarea id="ec-description" rows="2"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="builder-step">
+                            <h4>2. Sending Accounts &amp; Window</h4>
+                            <div class="form-group">
+                                <label>Sending Inboxes (rotated)</label>
+                                <div id="ec-account-picker" class="account-picker"></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Send Window Start (ET)</label>
+                                    <input type="time" id="ec-window-start" value="09:00">
+                                </div>
+                                <div class="form-group">
+                                    <label>Send Window End (ET)</label>
+                                    <input type="time" id="ec-window-end" value="17:00">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Send Days</label>
+                                <div class="weekday-picker" id="ec-send-days">
+                                    <label><input type="checkbox" value="mon" checked> Mon</label>
+                                    <label><input type="checkbox" value="tue" checked> Tue</label>
+                                    <label><input type="checkbox" value="wed" checked> Wed</label>
+                                    <label><input type="checkbox" value="thu" checked> Thu</label>
+                                    <label><input type="checkbox" value="fri" checked> Fri</label>
+                                    <label><input type="checkbox" value="sat"> Sat</label>
+                                    <label><input type="checkbox" value="sun"> Sun</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="builder-step">
+                            <h4>3. AI Personalization <span class="badge-new">SMART</span></h4>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="ec-ai-toggle"> Generate a personalized opening line per contact
+                            </label>
+                            <div id="ec-ai-prompt-wrap" class="form-group" style="display:none">
+                                <label>Personalization prompt (used by Claude)</label>
+                                <textarea id="ec-ai-prompt" rows="3" placeholder="Example: Write a one-line opener referencing the recipient's most recent permit work in NYC. Keep it observational, not flattering."></textarea>
+                                <small class="muted">Use <code>{ai_first_line}</code> in your email body to place the generated opener.</small>
+                            </div>
+                        </div>
+
+                        <div class="builder-step">
+                            <h4>4. Tracking</h4>
+                            <label class="checkbox-label"><input type="checkbox" id="ec-track-opens" checked> Track opens (1×1 pixel)</label>
+                            <label class="checkbox-label"><input type="checkbox" id="ec-track-clicks" checked> Track clicks (link rewrite)</label>
+                        </div>
+
+                        <div class="builder-step">
+                            <h4>5. Sequence</h4>
+                            <div id="ec-messages-list"></div>
+                            <button class="btn btn-secondary btn-sm" id="ec-add-message-btn"><i class="fas fa-plus"></i> Add Step</button>
+                        </div>
+
+                        <div class="builder-step">
+                            <h4>6. Recipients</h4>
+                            <p class="muted">Pull emails from your leads database (<code>owner_contacts.email</code>), or paste a list.</p>
+                            <button class="btn btn-secondary" id="ec-pull-leads-btn"><i class="fas fa-database"></i> Pull from leads DB</button>
+                            <textarea id="ec-paste-emails" rows="4" placeholder="Or paste emails — one per line, optionally as: email,name,company"></textarea>
+                            <div id="ec-enrollment-stats" class="muted"></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="hideModal('email-campaign-modal')">Cancel</button>
+                        <button class="btn btn-primary" id="ec-save-btn">Save Draft</button>
+                        <button class="btn btn-success" id="ec-launch-btn">Save &amp; Launch</button>
+                    </div>
+                </div>
+            </div>
 
             <!-- Templates View -->
             <section id="templates-view" class="view">
@@ -1040,5 +1226,6 @@
     <div class="toast" id="toast"></div>
 
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/email.js') }}"></script>
 </body>
 </html>

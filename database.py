@@ -541,12 +541,442 @@ class CampaignSend(Base):
         }
 
 
+# =============================================================================
+# EMAIL TABLES (Instantly-style cold email)
+# =============================================================================
+
+class EmailAccountStatus(enum.Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    DISCONNECTED = "disconnected"
+    ERROR = "error"
+    WARMING = "warming"
+
+
+class EmailAccount(Base):
+    """
+    A connected sending mailbox (Gmail / Workspace) used for rotation.
+    Stores OAuth refresh token; access tokens are minted on demand.
+    """
+    __tablename__ = 'email_accounts'
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    display_name = Column(String(255), nullable=True)   # "From" name on outbound
+    provider = Column(String(20), default='gmail')      # gmail | google_workspace
+
+    # OAuth tokens
+    refresh_token = Column(Text, nullable=True)
+    access_token = Column(Text, nullable=True)
+    token_expires_at = Column(DateTime, nullable=True)
+    scopes = Column(Text, nullable=True)
+
+    # Sending policy
+    daily_cap = Column(Integer, default=50)             # Max sends/day for this inbox
+    min_delay_seconds = Column(Integer, default=45)     # Jitter floor between sends
+    max_delay_seconds = Column(Integer, default=180)    # Jitter ceiling
+    sends_today = Column(Integer, default=0)            # Rolling counter, reset daily
+    sends_today_date = Column(String(10), nullable=True) # YYYY-MM-DD of the counter
+
+    # Health
+    status = Column(String(20), default=EmailAccountStatus.ACTIVE.value)
+    bounce_count_7d = Column(Integer, default=0)        # For deliverability scoring
+    complaint_count_7d = Column(Integer, default=0)
+    last_send_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+
+    # Reply polling (Gmail History API cursor)
+    history_id = Column(String(50), nullable=True)
+    last_polled_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'email': self.email,
+            'display_name': self.display_name,
+            'provider': self.provider,
+            'daily_cap': self.daily_cap,
+            'min_delay_seconds': self.min_delay_seconds,
+            'max_delay_seconds': self.max_delay_seconds,
+            'sends_today': self.sends_today if self.sends_today_date == datetime.utcnow().strftime('%Y-%m-%d') else 0,
+            'status': self.status,
+            'bounce_count_7d': self.bounce_count_7d,
+            'complaint_count_7d': self.complaint_count_7d,
+            'last_send_at': self.last_send_at.isoformat() if self.last_send_at else None,
+            'last_error': self.last_error,
+            'has_refresh_token': bool(self.refresh_token),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class EmailCampaign(Base):
+    """
+    An email campaign (sequence of emails) — mirror of Campaign but email-side.
+    Kept separate from the SMS Campaign table to avoid schema bloat and let
+    each channel evolve independently.
+    """
+    __tablename__ = 'email_campaigns'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(20), default=CampaignStatus.DRAFT.value)
+
+    # Recipient source
+    enrollment_type = Column(String(20), default='snapshot')  # snapshot | dynamic
+    filter_criteria = Column(Text, nullable=True)             # JSON, applied to owner_contacts
+
+    # Send policy
+    send_window_start = Column(String(10), default='09:00')   # Eastern, HH:MM
+    send_window_end = Column(String(10), default='17:00')
+    send_days = Column(String(50), default='mon,tue,wed,thu,fri')  # CSV weekdays
+    timezone = Column(String(50), default='America/New_York')
+
+    # Inbox rotation
+    sending_account_ids = Column(Text, nullable=True)         # JSON array of EmailAccount ids
+    rotation_strategy = Column(String(20), default='round_robin')  # round_robin | least_used
+
+    # AI personalization toggle
+    ai_personalization = Column(Boolean, default=False)
+    ai_prompt = Column(Text, nullable=True)                   # Used to build per-contact opener
+
+    # Tracking
+    track_opens = Column(Boolean, default=True)
+    track_clicks = Column(Boolean, default=True)
+
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    paused_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    messages = relationship("EmailCampaignMessage", back_populates="campaign", order_by="EmailCampaignMessage.sequence_order", cascade="all, delete-orphan")
+    enrollments = relationship("EmailEnrollment", back_populates="campaign", cascade="all, delete-orphan")
+
+    def to_dict(self, include_stats=False):
+        import json
+        result = {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'status': self.status,
+            'enrollment_type': self.enrollment_type,
+            'filter_criteria': json.loads(self.filter_criteria) if self.filter_criteria else {},
+            'send_window_start': self.send_window_start,
+            'send_window_end': self.send_window_end,
+            'send_days': self.send_days,
+            'timezone': self.timezone,
+            'sending_account_ids': json.loads(self.sending_account_ids) if self.sending_account_ids else [],
+            'rotation_strategy': self.rotation_strategy,
+            'ai_personalization': self.ai_personalization,
+            'ai_prompt': self.ai_prompt,
+            'track_opens': self.track_opens,
+            'track_clicks': self.track_clicks,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'paused_at': self.paused_at.isoformat() if self.paused_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'message_count': len(self.messages) if self.messages else 0,
+        }
+        if include_stats:
+            result['stats'] = self.get_stats()
+        return result
+
+    def get_stats(self):
+        if not self.enrollments:
+            return {
+                'total_enrolled': 0, 'sent': 0, 'opens': 0, 'clicks': 0,
+                'replies': 0, 'bounces': 0, 'unsubscribed': 0,
+                'open_rate': 0, 'reply_rate': 0, 'bounce_rate': 0,
+            }
+        total = len(self.enrollments)
+        replied = sum(1 for e in self.enrollments if e.first_reply_at)
+        bounced = sum(1 for e in self.enrollments if e.status == 'bounced')
+        unsubscribed = sum(1 for e in self.enrollments if e.status == 'unsubscribed')
+        opens = sum(1 for e in self.enrollments if e.open_count > 0)
+        clicks = sum(1 for e in self.enrollments if e.click_count > 0)
+        sent = sum(1 for e in self.enrollments if e.current_step > 0)
+        return {
+            'total_enrolled': total,
+            'sent': sent,
+            'opens': opens,
+            'clicks': clicks,
+            'replies': replied,
+            'bounces': bounced,
+            'unsubscribed': unsubscribed,
+            'open_rate': round((opens / sent * 100), 1) if sent else 0,
+            'reply_rate': round((replied / sent * 100), 1) if sent else 0,
+            'bounce_rate': round((bounced / sent * 100), 1) if sent else 0,
+            'click_rate': round((clicks / sent * 100), 1) if sent else 0,
+        }
+
+
+class EmailCampaignMessage(Base):
+    """A single step in an email sequence."""
+    __tablename__ = 'email_campaign_messages'
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey('email_campaigns.id'), nullable=False)
+    sequence_order = Column(Integer, nullable=False)
+
+    subject = Column(Text, nullable=False)
+    preheader = Column(Text, nullable=True)               # Hidden preview text
+    body_html = Column(Text, nullable=False)              # Sanitized HTML
+    body_text = Column(Text, nullable=True)               # Plain fallback (auto-derived if null)
+
+    days_after_previous = Column(Integer, default=0)      # 0 for first step
+    same_thread = Column(Boolean, default=True)           # Reply to prev for follow-ups
+
+    # A/B test on subject line (lowest-friction)
+    has_ab_test = Column(Boolean, default=False)
+    subject_variant_b = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    campaign = relationship("EmailCampaign", back_populates="messages")
+    sends = relationship("EmailSend", back_populates="message", cascade="all, delete-orphan")
+
+    def to_dict(self, include_stats=False):
+        result = {
+            'id': self.id,
+            'campaign_id': self.campaign_id,
+            'sequence_order': self.sequence_order,
+            'subject': self.subject,
+            'preheader': self.preheader,
+            'body_html': self.body_html,
+            'body_text': self.body_text,
+            'days_after_previous': self.days_after_previous,
+            'same_thread': self.same_thread,
+            'has_ab_test': self.has_ab_test,
+            'subject_variant_b': self.subject_variant_b,
+        }
+        if include_stats and self.sends:
+            sent = len(self.sends)
+            opens = sum(1 for s in self.sends if s.opened_at)
+            clicks = sum(1 for s in self.sends if s.clicked_at)
+            replies = sum(1 for s in self.sends if s.replied_at)
+            result['stats'] = {
+                'sent': sent,
+                'opens': opens,
+                'clicks': clicks,
+                'replies': replies,
+                'open_rate': round((opens / sent * 100), 1) if sent else 0,
+                'reply_rate': round((replies / sent * 100), 1) if sent else 0,
+            }
+        return result
+
+
+class EmailEnrollment(Base):
+    """A recipient's progress through an email campaign."""
+    __tablename__ = 'email_enrollments'
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey('email_campaigns.id'), nullable=False)
+
+    email = Column(String(255), nullable=False, index=True)
+    name = Column(String(255), nullable=True)
+    company = Column(String(255), nullable=True)
+    extra_data = Column(Text, nullable=True)                # JSON: owner_name, permit_no, address, etc.
+
+    # AI personalization output, generated once at enrollment (or first send)
+    ai_first_line = Column(Text, nullable=True)
+    ai_generated_at = Column(DateTime, nullable=True)
+
+    # A/B assignment
+    ab_variant = Column(String(1), nullable=True)
+
+    # Progress
+    current_step = Column(Integer, default=0)
+    status = Column(String(20), default=EnrollmentStatus.ACTIVE.value)
+
+    # Gmail threading — preserve thread across follow-ups
+    gmail_thread_id = Column(String(100), nullable=True)
+    gmail_message_id_header = Column(String(255), nullable=True)  # Original Message-ID for In-Reply-To
+
+    enrolled_at = Column(DateTime, default=datetime.utcnow)
+    last_sent_at = Column(DateTime, nullable=True)
+    next_send_at = Column(DateTime, nullable=True)
+
+    # Engagement tracking
+    open_count = Column(Integer, default=0)
+    click_count = Column(Integer, default=0)
+    first_open_at = Column(DateTime, nullable=True)
+    first_click_at = Column(DateTime, nullable=True)
+    first_reply_at = Column(DateTime, nullable=True)
+
+    # Termination
+    bounced_at = Column(DateTime, nullable=True)
+    unsubscribed_at = Column(DateTime, nullable=True)
+    unsubscribe_token = Column(String(64), nullable=True, unique=True, index=True)
+
+    campaign = relationship("EmailCampaign", back_populates="enrollments")
+    sends = relationship("EmailSend", back_populates="enrollment", cascade="all, delete-orphan")
+
+    def to_dict(self):
+        import json
+        return {
+            'id': self.id,
+            'campaign_id': self.campaign_id,
+            'email': self.email,
+            'name': self.name,
+            'company': self.company,
+            'extra_data': json.loads(self.extra_data) if self.extra_data else {},
+            'ai_first_line': self.ai_first_line,
+            'ab_variant': self.ab_variant,
+            'current_step': self.current_step,
+            'status': self.status,
+            'enrolled_at': self.enrolled_at.isoformat() if self.enrolled_at else None,
+            'last_sent_at': self.last_sent_at.isoformat() if self.last_sent_at else None,
+            'next_send_at': self.next_send_at.isoformat() if self.next_send_at else None,
+            'open_count': self.open_count,
+            'click_count': self.click_count,
+            'first_open_at': self.first_open_at.isoformat() if self.first_open_at else None,
+            'first_reply_at': self.first_reply_at.isoformat() if self.first_reply_at else None,
+            'bounced_at': self.bounced_at.isoformat() if self.bounced_at else None,
+            'unsubscribed_at': self.unsubscribed_at.isoformat() if self.unsubscribed_at else None,
+        }
+
+
+class EmailSend(Base):
+    """One outbound email — audit trail."""
+    __tablename__ = 'email_sends'
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, ForeignKey('email_campaigns.id'), nullable=False, index=True)
+    message_id = Column(Integer, ForeignKey('email_campaign_messages.id'), nullable=False)
+    enrollment_id = Column(Integer, ForeignKey('email_enrollments.id'), nullable=False)
+    account_id = Column(Integer, ForeignKey('email_accounts.id'), nullable=True)  # Which inbox sent it
+
+    to_email = Column(String(255), nullable=False, index=True)
+    from_email = Column(String(255), nullable=False)
+    subject = Column(Text, nullable=False)
+    body_html = Column(Text, nullable=False)                # Final rendered content
+    body_text = Column(Text, nullable=True)
+    ab_variant = Column(String(1), nullable=True)
+
+    # Provider tracking
+    gmail_message_id = Column(String(100), nullable=True, index=True)
+    gmail_thread_id = Column(String(100), nullable=True, index=True)
+    message_id_header = Column(String(255), nullable=True)  # RFC Message-ID
+
+    status = Column(String(20), default='pending')          # pending|sent|failed|bounced
+    error_message = Column(Text, nullable=True)
+
+    scheduled_for = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+
+    # Engagement (latest)
+    opened_at = Column(DateTime, nullable=True)
+    clicked_at = Column(DateTime, nullable=True)
+    replied_at = Column(DateTime, nullable=True)
+    bounced_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    message = relationship("EmailCampaignMessage", back_populates="sends")
+    enrollment = relationship("EmailEnrollment", back_populates="sends")
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'campaign_id': self.campaign_id,
+            'message_id': self.message_id,
+            'enrollment_id': self.enrollment_id,
+            'account_id': self.account_id,
+            'to_email': self.to_email,
+            'from_email': self.from_email,
+            'subject': self.subject,
+            'ab_variant': self.ab_variant,
+            'gmail_message_id': self.gmail_message_id,
+            'gmail_thread_id': self.gmail_thread_id,
+            'status': self.status,
+            'error_message': self.error_message,
+            'scheduled_for': self.scheduled_for.isoformat() if self.scheduled_for else None,
+            'sent_at': self.sent_at.isoformat() if self.sent_at else None,
+            'opened_at': self.opened_at.isoformat() if self.opened_at else None,
+            'clicked_at': self.clicked_at.isoformat() if self.clicked_at else None,
+            'replied_at': self.replied_at.isoformat() if self.replied_at else None,
+            'bounced_at': self.bounced_at.isoformat() if self.bounced_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class EmailEvent(Base):
+    """Event log: open, click, reply, bounce, unsubscribe. Useful for timelines."""
+    __tablename__ = 'email_events'
+
+    id = Column(Integer, primary_key=True)
+    send_id = Column(Integer, ForeignKey('email_sends.id'), nullable=True, index=True)
+    enrollment_id = Column(Integer, ForeignKey('email_enrollments.id'), nullable=True, index=True)
+    campaign_id = Column(Integer, nullable=True, index=True)
+
+    event_type = Column(String(20), nullable=False)         # open|click|reply|bounce|unsubscribe|complaint
+    url = Column(Text, nullable=True)                       # for click events
+    metadata_json = Column(Text, nullable=True)             # JSON: user agent, ip, referrer
+    occurred_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class EmailUnsubscribe(Base):
+    """Global suppression list — once unsubscribed, never email again."""
+    __tablename__ = 'email_unsubscribes'
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    reason = Column(String(100), nullable=True)             # one_click|reply|manual|complaint|bounce
+    source_campaign_id = Column(Integer, nullable=True)
+    unsubscribed_at = Column(DateTime, default=datetime.utcnow)
+
+
+class EmailReply(Base):
+    """Captured inbound reply (parsed from Gmail). Powers the unified inbox view."""
+    __tablename__ = 'email_replies'
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey('email_accounts.id'), nullable=False, index=True)
+    enrollment_id = Column(Integer, ForeignKey('email_enrollments.id'), nullable=True, index=True)
+    campaign_id = Column(Integer, nullable=True, index=True)
+
+    gmail_message_id = Column(String(100), nullable=True, unique=True, index=True)
+    gmail_thread_id = Column(String(100), nullable=True, index=True)
+
+    from_email = Column(String(255), nullable=False)
+    from_name = Column(String(255), nullable=True)
+    subject = Column(Text, nullable=True)
+    snippet = Column(Text, nullable=True)
+    body_text = Column(Text, nullable=True)
+
+    received_at = Column(DateTime, default=datetime.utcnow)
+    is_auto_reply = Column(Boolean, default=False)          # Out-of-office, bounce, etc.
+    read = Column(Boolean, default=False)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'account_id': self.account_id,
+            'enrollment_id': self.enrollment_id,
+            'campaign_id': self.campaign_id,
+            'from_email': self.from_email,
+            'from_name': self.from_name,
+            'subject': self.subject,
+            'snippet': self.snippet,
+            'body_text': self.body_text,
+            'received_at': self.received_at.isoformat() if self.received_at else None,
+            'is_auto_reply': self.is_auto_reply,
+            'read': self.read,
+        }
+
+
 def init_db():
     """Initialize the database tables"""
     try:
         Base.metadata.create_all(engine)
         logger.info("✓ Database tables initialized successfully")
-        
+
         # Run migrations for new columns
         _run_migrations()
     except Exception as e:
@@ -557,7 +987,7 @@ def init_db():
 def _run_migrations():
     """Add new columns to existing tables if they don't exist"""
     from sqlalchemy import text
-    
+
     migrations = [
         # Add recurring schedule columns to scheduled_bulk_messages
         ("scheduled_bulk_messages", "is_recurring", "BOOLEAN DEFAULT FALSE"),
