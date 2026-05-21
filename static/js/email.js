@@ -411,8 +411,23 @@
     }
 
     renderBuilderMessages();
+    wireCSVDropzone();
+    clearCSV();
     showModal('email-campaign-modal');
   }
+
+  // Tokens that can be inserted into subject / body via chip click
+  const VARIABLE_TOKENS = [
+    { token: '{first_name}', label: 'first_name' },
+    { token: '{name}', label: 'name' },
+    { token: '{company}', label: 'company' },
+    { token: '{email}', label: 'email' },
+    { token: '{ai_first_line}', label: 'ai_first_line', ai: true },
+    { token: '{spin:Hi|Hey|Hello}', label: 'spin:…' },
+  ];
+
+  // Track which textarea/input was last focused so chip clicks know where to insert
+  let lastFocusedField = null;
 
   function renderBuilderMessages() {
     const wrap = document.getElementById('ec-messages-list');
@@ -430,7 +445,13 @@
         </div>
         <input type="text" class="bm-subject" placeholder="Subject" data-bm="subject" value="${escapeHtml(m.subject || '')}">
         <input type="text" class="bm-subject-b" placeholder="Subject B (A/B test, optional)" data-bm="subject_variant_b" value="${escapeHtml(m.subject_variant_b || '')}">
-        <textarea class="bm-body" rows="8" placeholder="Email body (HTML). Use {first_name}, {company}, {ai_first_line}, {spin:Hi|Hey|Hello}..." data-bm="body_html">${escapeHtml(m.body_html || '')}</textarea>
+        <textarea class="bm-body" rows="8" placeholder="Email body (HTML). Click variables below to insert them..." data-bm="body_html">${escapeHtml(m.body_html || '')}</textarea>
+        <div class="variable-chips">
+          <span class="variable-chips-label">Insert:</span>
+          ${VARIABLE_TOKENS.map(v => `
+            <button type="button" class="var-chip ${v.ai ? 'var-chip-ai' : ''}" data-token="${escapeHtml(v.token)}">${escapeHtml(v.label)}</button>
+          `).join('')}
+        </div>
         ${i > 0 ? `<label class="checkbox-label"><input type="checkbox" data-bm="same_thread" ${m.same_thread !== false ? 'checked' : ''}> Send in same thread (Re: ...)</label>` : ''}
       </div>
     `).join('');
@@ -446,8 +467,40 @@
           if (input.type === 'number') val = parseInt(val, 10) || 0;
           state.builder.messages[idx][field] = val;
         });
+        // Track focus so chip clicks know where to insert
+        if (input.tagName === 'TEXTAREA' || (input.tagName === 'INPUT' && input.type === 'text')) {
+          input.addEventListener('focus', () => { lastFocusedField = input; });
+        }
+      });
+
+      // Wire variable chip clicks
+      node.querySelectorAll('.var-chip').forEach(chip => {
+        chip.addEventListener('mousedown', (e) => {
+          // mousedown (not click) so focus doesn't move off the textarea
+          e.preventDefault();
+          const token = chip.dataset.token;
+          // Prefer the focused field within THIS step's builder-message
+          let target = lastFocusedField && node.contains(lastFocusedField) ? lastFocusedField : node.querySelector('.bm-body');
+          insertAtCursor(target, token);
+          // Update state from the modified value
+          const field = target.dataset.bm;
+          if (field) state.builder.messages[idx][field] = target.value;
+        });
       });
     });
+  }
+
+  function insertAtCursor(field, text) {
+    if (!field) return;
+    field.focus();
+    const start = field.selectionStart || 0;
+    const end = field.selectionEnd || 0;
+    const value = field.value || '';
+    field.value = value.slice(0, start) + text + value.slice(end);
+    const newPos = start + text.length;
+    field.setSelectionRange(newPos, newPos);
+    // Fire input event so any listeners pick up the change
+    field.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   function addBuilderMessage() {
@@ -487,6 +540,221 @@
       if (!email || !email.includes('@')) return null;
       return { email, name: parts[1] || '', company: parts[2] || '' };
     }).filter(Boolean);
+  }
+
+  // ============ CSV upload + auto-mapping ============
+  const csvState = {
+    headers: [],
+    rows: [],          // array of arrays
+    mapping: {},       // { email: colIdx, name: colIdx, company: colIdx }
+    rawText: '',
+  };
+
+  // Minimal RFC 4180-ish CSV parser (handles quotes & embedded commas/newlines)
+  function parseCSV(text) {
+    const rows = [];
+    let row = [], field = '', i = 0, inQuotes = false;
+    while (i < text.length) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"' && text[i + 1] === '"') { field += '"'; i += 2; continue; }
+        if (c === '"') { inQuotes = false; i++; continue; }
+        field += c; i++; continue;
+      }
+      if (c === '"') { inQuotes = true; i++; continue; }
+      if (c === ',') { row.push(field); field = ''; i++; continue; }
+      if (c === '\r') { i++; continue; }
+      if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+      field += c; i++;
+    }
+    if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+    return rows.filter(r => r.some(c => c && c.trim()));  // drop blank lines
+  }
+
+  // Fuzzy header matching — returns the column index that best matches each target
+  function autodetectColumns(headers) {
+    const norm = s => (s || '').toLowerCase().replace(/[\s_\-]/g, '');
+    const headersN = headers.map(norm);
+
+    // Patterns ordered by specificity
+    const matchers = {
+      email: ['email', 'emailaddress', 'mail', 'workemail', 'primaryemail'],
+      name: ['fullname', 'name', 'contactname', 'ownername', 'recipientname'],
+      first_name: ['firstname', 'fname', 'given', 'givenname'],
+      last_name: ['lastname', 'lname', 'surname', 'family', 'familyname'],
+      company: ['company', 'companyname', 'organization', 'organisation', 'business', 'businessname', 'employer', 'firm', 'account'],
+    };
+
+    const mapping = {};
+    for (const [key, candidates] of Object.entries(matchers)) {
+      for (const candidate of candidates) {
+        const idx = headersN.findIndex(h => h === candidate);
+        if (idx >= 0) { mapping[key] = idx; break; }
+      }
+      // Fallback: contains
+      if (mapping[key] === undefined) {
+        for (const candidate of candidates) {
+          const idx = headersN.findIndex(h => h.includes(candidate));
+          if (idx >= 0) { mapping[key] = idx; break; }
+        }
+      }
+    }
+    return mapping;
+  }
+
+  function handleCSVFile(file) {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast('CSV too large (max 10 MB)', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = reader.result;
+        csvState.rawText = text;
+        const rows = parseCSV(text);
+        if (rows.length < 2) {
+          toast('CSV needs at least a header row + 1 data row', 'error');
+          return;
+        }
+        csvState.headers = rows[0];
+        csvState.rows = rows.slice(1);
+        csvState.mapping = autodetectColumns(csvState.headers);
+        renderCSVMapping();
+      } catch (e) {
+        toast('Failed to parse CSV: ' + e.message, 'error');
+      }
+    };
+    reader.onerror = () => toast('Failed to read file', 'error');
+    reader.readAsText(file);
+  }
+
+  function renderCSVMapping() {
+    const wrap = document.getElementById('ec-csv-mapping');
+    wrap.style.display = 'block';
+
+    const headerOpts = csvState.headers.map((h, i) => `<option value="${i}">${escapeHtml(h)}</option>`).join('');
+    const opt = (key) => {
+      const sel = csvState.mapping[key];
+      return `<select data-csv-map="${key}">
+        <option value="">— none —</option>
+        ${csvState.headers.map((h, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}
+      </select>`;
+    };
+
+    const detected = Object.keys(csvState.mapping).length;
+    const status = csvState.mapping.email !== undefined
+      ? `<span style="color:#065f46">✓ Auto-detected ${detected} column${detected === 1 ? '' : 's'} from ${csvState.rows.length} rows</span>`
+      : `<span style="color:#92400e">⚠ Couldn't auto-detect the email column — pick it below</span>`;
+
+    wrap.innerHTML = `
+      <div class="csv-mapping-header">${status}</div>
+      <div class="csv-mapping-row"><strong>Email</strong> <span>→</span> ${opt('email')}</div>
+      <div class="csv-mapping-row"><strong>Name</strong> <span>→</span> ${opt('name')}</div>
+      <div class="csv-mapping-row"><strong>First name</strong> <span>→</span> ${opt('first_name')}</div>
+      <div class="csv-mapping-row"><strong>Last name</strong> <span>→</span> ${opt('last_name')}</div>
+      <div class="csv-mapping-row"><strong>Company</strong> <span>→</span> ${opt('company')}</div>
+      <div class="csv-preview">${csvState.rows.slice(0, 3).map(r => escapeHtml(r.join(' | '))).join('<br>')}</div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button type="button" class="btn btn-primary btn-sm" id="ec-csv-apply">Use ${csvState.rows.length} contacts from CSV</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="ec-csv-clear">Clear</button>
+      </div>
+    `;
+
+    wrap.querySelectorAll('[data-csv-map]').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const k = sel.dataset.csvMap;
+        const v = sel.value;
+        if (v === '') delete csvState.mapping[k];
+        else csvState.mapping[k] = parseInt(v, 10);
+      });
+    });
+
+    document.getElementById('ec-csv-apply').addEventListener('click', applyCSVToBuilder);
+    document.getElementById('ec-csv-clear').addEventListener('click', clearCSV);
+  }
+
+  function csvRowsToContacts() {
+    const m = csvState.mapping;
+    if (m.email === undefined) {
+      toast('You must map the email column', 'error');
+      return [];
+    }
+    const contacts = [];
+    for (const row of csvState.rows) {
+      const email = (row[m.email] || '').trim();
+      if (!email || !email.includes('@')) continue;
+      const first = m.first_name !== undefined ? (row[m.first_name] || '').trim() : '';
+      const last = m.last_name !== undefined ? (row[m.last_name] || '').trim() : '';
+      let name = m.name !== undefined ? (row[m.name] || '').trim() : '';
+      if (!name && (first || last)) name = `${first} ${last}`.trim();
+      const company = m.company !== undefined ? (row[m.company] || '').trim() : '';
+
+      // Preserve unmapped columns as extra_data
+      const extra = {};
+      csvState.headers.forEach((h, i) => {
+        const mappedAs = Object.entries(m).find(([_, idx]) => idx === i);
+        if (mappedAs) return;
+        if (row[i] && row[i].trim()) extra[h.toLowerCase().replace(/\s+/g, '_')] = row[i].trim();
+      });
+
+      contacts.push({ email, name, company, ...extra });
+    }
+    return contacts;
+  }
+
+  // Stash CSV contacts on the builder until save
+  function applyCSVToBuilder() {
+    const contacts = csvRowsToContacts();
+    if (contacts.length === 0) return;
+    state.builder._csvContacts = contacts;
+    document.getElementById('ec-enrollment-stats').textContent = `Ready to enroll ${contacts.length} contacts from CSV when you save`;
+    toast(`${contacts.length} CSV contacts queued`, 'success');
+  }
+
+  function clearCSV() {
+    csvState.headers = [];
+    csvState.rows = [];
+    csvState.mapping = {};
+    csvState.rawText = '';
+    delete state.builder._csvContacts;
+    const wrap = document.getElementById('ec-csv-mapping');
+    wrap.style.display = 'none';
+    wrap.innerHTML = '';
+    document.getElementById('ec-csv-file').value = '';
+    document.getElementById('ec-enrollment-stats').textContent = '';
+  }
+
+  function wireCSVDropzone() {
+    const dropzone = document.getElementById('ec-csv-dropzone');
+    const fileInput = document.getElementById('ec-csv-file');
+    const browseBtn = document.getElementById('ec-csv-browse');
+    if (!dropzone || !fileInput) return;
+
+    // Avoid double-wiring
+    if (dropzone.dataset.wired) return;
+    dropzone.dataset.wired = '1';
+
+    browseBtn.addEventListener('click', (e) => { e.preventDefault(); fileInput.click(); });
+    fileInput.addEventListener('change', () => handleCSVFile(fileInput.files[0]));
+
+    ['dragenter', 'dragover'].forEach(ev => dropzone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation();
+      dropzone.classList.add('drag-over');
+    }));
+    ['dragleave', 'drop'].forEach(ev => dropzone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation();
+      dropzone.classList.remove('drag-over');
+    }));
+    dropzone.addEventListener('drop', e => {
+      const file = e.dataTransfer.files[0];
+      if (file) handleCSVFile(file);
+    });
+    dropzone.addEventListener('click', (e) => {
+      if (e.target === browseBtn) return;
+      fileInput.click();
+    });
   }
 
   async function saveCampaign(launchAfter) {
@@ -543,11 +811,13 @@
       });
     }
 
-    // Enroll pasted contacts (if any)
+    // Enroll: combine pasted + CSV contacts
     const pasted = parsePastedEmails(document.getElementById('ec-paste-emails').value);
-    if (pasted.length > 0) {
+    const fromCsv = state.builder._csvContacts || [];
+    const allNew = [...pasted, ...fromCsv];
+    if (allNew.length > 0) {
       const er = await api(`/api/email/campaigns/${campaignId}/enroll`, {
-        method: 'POST', body: JSON.stringify({ contacts: pasted }),
+        method: 'POST', body: JSON.stringify({ contacts: allNew }),
       });
       if (er.success) toast(`Enrolled ${er.enrolled} contacts`, 'success');
     }

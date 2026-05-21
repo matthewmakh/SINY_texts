@@ -465,26 +465,34 @@
                             <div class="form-group">
                                 <label>Send Days</label>
                                 <div class="weekday-picker" id="ec-send-days">
-                                    <label><input type="checkbox" value="mon" checked> Mon</label>
-                                    <label><input type="checkbox" value="tue" checked> Tue</label>
-                                    <label><input type="checkbox" value="wed" checked> Wed</label>
-                                    <label><input type="checkbox" value="thu" checked> Thu</label>
-                                    <label><input type="checkbox" value="fri" checked> Fri</label>
-                                    <label><input type="checkbox" value="sat"> Sat</label>
-                                    <label><input type="checkbox" value="sun"> Sun</label>
+                                    <label class="weekday-pill"><input type="checkbox" value="mon" checked><span>Mon</span></label>
+                                    <label class="weekday-pill"><input type="checkbox" value="tue" checked><span>Tue</span></label>
+                                    <label class="weekday-pill"><input type="checkbox" value="wed" checked><span>Wed</span></label>
+                                    <label class="weekday-pill"><input type="checkbox" value="thu" checked><span>Thu</span></label>
+                                    <label class="weekday-pill"><input type="checkbox" value="fri" checked><span>Fri</span></label>
+                                    <label class="weekday-pill"><input type="checkbox" value="sat"><span>Sat</span></label>
+                                    <label class="weekday-pill"><input type="checkbox" value="sun"><span>Sun</span></label>
                                 </div>
                             </div>
                         </div>
 
                         <div class="builder-step">
                             <h4>3. AI Personalization <span class="badge-new">SMART</span></h4>
+                            <p class="muted explainer">
+                                When enabled, Claude writes a unique one-line opener for each recipient based on what we know about them
+                                (their permit history, company, address). The opener is generated once per recipient on first send and cached —
+                                so a 1,000-person campaign makes 1,000 quick AI calls total, not per email.
+                                <br><br>
+                                <strong>How to use:</strong> turn it on, describe the kind of opener you want, then place <code>{ai_first_line}</code>
+                                anywhere in your email body where the generated line should appear.
+                            </p>
                             <label class="checkbox-label">
                                 <input type="checkbox" id="ec-ai-toggle"> Generate a personalized opening line per contact
                             </label>
                             <div id="ec-ai-prompt-wrap" class="form-group" style="display:none">
-                                <label>Personalization prompt (used by Claude)</label>
+                                <label>Personalization prompt</label>
                                 <textarea id="ec-ai-prompt" rows="3" placeholder="Example: Write a one-line opener referencing the recipient's most recent permit work in NYC. Keep it observational, not flattering."></textarea>
-                                <small class="muted">Use <code>{ai_first_line}</code> in your email body to place the generated opener.</small>
+                                <small class="muted">Tip: be specific about tone and length. Short, observational openers convert best.</small>
                             </div>
                         </div>
 
@@ -502,9 +510,32 @@
 
                         <div class="builder-step">
                             <h4>6. Recipients</h4>
-                            <p class="muted">Pull emails from your leads database (<code>owner_contacts.email</code>), or paste a list.</p>
-                            <button class="btn btn-secondary" id="ec-pull-leads-btn"><i class="fas fa-database"></i> Pull from leads DB</button>
-                            <textarea id="ec-paste-emails" rows="4" placeholder="Or paste emails — one per line, optionally as: email,name,company"></textarea>
+                            <p class="muted">Three ways to add recipients — combine them freely.</p>
+
+                            <div class="recipient-options">
+                                <div class="recipient-option">
+                                    <div class="recipient-option-title"><i class="fas fa-database"></i> From leads database</div>
+                                    <p class="muted">Pulls every row in <code>owner_contacts</code> that has an email.</p>
+                                    <button class="btn btn-secondary btn-sm" id="ec-pull-leads-btn">Pull from leads DB</button>
+                                </div>
+
+                                <div class="recipient-option">
+                                    <div class="recipient-option-title"><i class="fas fa-file-csv"></i> Upload CSV</div>
+                                    <p class="muted">Drag a CSV or click to upload. Columns auto-detect; you can remap if we guess wrong.</p>
+                                    <div class="csv-dropzone" id="ec-csv-dropzone">
+                                        <input type="file" id="ec-csv-file" accept=".csv,text/csv" style="display:none">
+                                        <i class="fas fa-cloud-upload-alt"></i>
+                                        <div>Drop CSV here or <button type="button" class="btn-link" id="ec-csv-browse">browse</button></div>
+                                    </div>
+                                    <div id="ec-csv-mapping" style="display:none"></div>
+                                </div>
+
+                                <div class="recipient-option">
+                                    <div class="recipient-option-title"><i class="fas fa-keyboard"></i> Paste list</div>
+                                    <textarea id="ec-paste-emails" rows="4" placeholder="One per line, optionally as: email,name,company"></textarea>
+                                </div>
+                            </div>
+
                             <div id="ec-enrollment-stats" class="muted"></div>
                         </div>
                     </div>
