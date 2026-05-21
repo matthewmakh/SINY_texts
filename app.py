@@ -1589,8 +1589,13 @@ def enroll_email_contacts(campaign_id):
         except Exception as e:
             logger.warning(f"Failed to pull owner_contacts emails: {e}")
 
-    count = email_campaign_service.enroll_contacts(campaign_id, contacts)
-    return jsonify({'success': True, 'enrolled': count})
+    stats = email_campaign_service.enroll_contacts(campaign_id, contacts)
+    # Backwards-compat: callers expect 'enrolled' as a number
+    return jsonify({
+        'success': True,
+        'enrolled': stats['enrolled'],
+        'stats': stats,
+    })
 
 
 @app.route('/api/email/campaigns/<int:campaign_id>/enrollments', methods=['GET'])
@@ -1798,6 +1803,81 @@ def email_unsubscribe(token):
 h1{margin:0 0 8px;font-size:22px}p{color:#555}</style>
 </head><body><div class="card"><h1>You've been unsubscribed</h1>
 <p>You won't receive any more emails from us. Sorry to see you go.</p></div></body></html>'''
+    finally:
+        session.close()
+
+
+# ---- AI Preview ----
+
+@app.route('/api/email/preview-opener', methods=['POST'])
+@login_required
+def preview_ai_opener():
+    """
+    Generate a sample AI opener so the user can sanity-check their prompt
+    before launching. Accepts:
+      {"prompt": "...", "sample_email": "foo@bar.com"}         # uses a real enriched contact
+      {"prompt": "...", "sample_contact": {"email":..., ...}}  # uses provided fields
+    """
+    from email_service import generate_ai_first_line, enrich_contact_from_leads, DEFAULT_AI_PROMPT
+    data = request.json or {}
+    prompt = data.get('prompt') or DEFAULT_AI_PROMPT
+
+    if data.get('sample_email'):
+        contact = enrich_contact_from_leads(data['sample_email'], {'email': data['sample_email']})
+    elif data.get('sample_contact'):
+        contact = data['sample_contact']
+        if contact.get('email'):
+            contact = enrich_contact_from_leads(contact['email'], contact)
+    else:
+        return jsonify({'success': False, 'error': 'sample_email or sample_contact required'}), 400
+
+    if not Config.ANTHROPIC_API_KEY:
+        return jsonify({
+            'success': False,
+            'error': 'ANTHROPIC_API_KEY not set — AI personalization disabled',
+            'context': contact,
+        }), 400
+
+    opener = generate_ai_first_line(prompt, contact)
+    return jsonify({
+        'success': True,
+        'opener': opener,
+        'is_empty': not opener,
+        'context': contact,
+    })
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>/preview-openers', methods=['POST'])
+@login_required
+def preview_campaign_openers(campaign_id):
+    """Generate up to N sample openers for already-enrolled contacts."""
+    from email_service import generate_ai_first_line, DEFAULT_AI_PROMPT
+    n = min(int(request.json.get('n', 3)) if request.json else 3, 10)
+    session = get_session()
+    try:
+        campaign = session.query(EmailCampaign).filter(EmailCampaign.id == campaign_id).first()
+        if not campaign:
+            return jsonify({'success': False, 'error': 'Not found'}), 404
+        enrollments = session.query(EmailEnrollment).filter(
+            EmailEnrollment.campaign_id == campaign_id
+        ).limit(n).all()
+        if not enrollments:
+            return jsonify({'success': False, 'error': 'No enrollments yet — add recipients first'}), 400
+
+        prompt = campaign.ai_prompt or DEFAULT_AI_PROMPT
+        results = []
+        for e in enrollments:
+            extra = json.loads(e.extra_data) if e.extra_data else {}
+            ctx = {'email': e.email, 'name': e.name, 'company': e.company, **extra}
+            opener = generate_ai_first_line(prompt, ctx) if Config.ANTHROPIC_API_KEY else None
+            results.append({
+                'email': e.email,
+                'name': e.name,
+                'company': e.company,
+                'context': ctx,
+                'opener': opener,
+            })
+        return jsonify({'success': True, 'previews': results})
     finally:
         session.close()
 

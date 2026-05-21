@@ -635,6 +635,73 @@
   overflow: auto;
 }
 
+/* AI opener preview */
+.ai-preview-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+
+.ai-preview-row input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.ai-preview-result {
+  margin-top: 10px;
+  padding: 12px;
+  background: linear-gradient(135deg, #ede9fe, #f3f4f6);
+  border-left: 3px solid #8b5cf6;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.ai-preview-result.empty {
+  background: #fef3c7;
+  border-left-color: #f59e0b;
+}
+
+.ai-preview-result-opener {
+  font-style: italic;
+  font-size: 15px;
+  color: #4338ca;
+  margin-bottom: 8px;
+}
+
+.ai-preview-result-context {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #4b5563;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 8px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.enrollment-feedback {
+  padding: 10px 12px;
+  background: #ecfdf5;
+  border-left: 3px solid #10b981;
+  border-radius: 4px;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.enrollment-feedback strong {
+  color: #065f46;
+}
+
+.enrollment-feedback .skipped {
+  color: #92400e;
+  margin-left: 12px;
+}
+
 .account-picker {
   display: flex;
   flex-direction: column;

@@ -193,9 +193,28 @@ class EmailCampaignService:
     # ---------------------- ENROLLMENT ----------------------
 
     def enroll_contacts(self, campaign_id: int, contacts: List[dict],
-                        exclude_emails: List[str] = None) -> int:
-        """Enroll a list of contacts. Each dict needs at least 'email'."""
+                        exclude_emails: List[str] = None,
+                        enrich: bool = True) -> dict:
+        """
+        Enroll a list of contacts. Each dict needs at least 'email'.
+        If enrich=True (default), each contact is run through clean_name() and
+        cross-referenced against the leads DB (owner_contacts + permits) so
+        the AI personalization has real context to work with.
+
+        Returns {enrolled, skipped_invalid, skipped_duplicate, skipped_unsubscribed,
+                 enriched_count} so the UI can show meaningful feedback.
+        """
+        # Lazy import to avoid circular dep
+        from email_service import enrich_contact_from_leads, clean_name
+
         session = get_session()
+        stats = {
+            'enrolled': 0,
+            'skipped_invalid': 0,
+            'skipped_duplicate': 0,
+            'skipped_unsubscribed': 0,
+            'enriched_count': 0,
+        }
         try:
             campaign = session.query(EmailCampaign).filter(EmailCampaign.id == campaign_id).first()
             if not campaign:
@@ -211,22 +230,54 @@ class EmailCampaignService:
             # Global suppression list
             unsubs = {u.email for u in session.query(EmailUnsubscribe).all()}
 
-            enrolled = 0
             seen = set()
             for c in contacts:
                 email = (c.get('email') or '').strip().lower()
                 if not email or '@' not in email:
+                    stats['skipped_invalid'] += 1
                     continue
-                if email in exclude or email in seen or email in unsubs:
+                if email in exclude or email in seen:
+                    stats['skipped_duplicate'] += 1
+                    continue
+                if email in unsubs:
+                    stats['skipped_unsubscribed'] += 1
                     continue
                 existing = session.query(EmailEnrollment).filter(
                     EmailEnrollment.campaign_id == campaign_id,
                     EmailEnrollment.email == email
                 ).first()
                 if existing:
+                    stats['skipped_duplicate'] += 1
                     continue
 
-                extra = {k: v for k, v in c.items() if k not in ('email', 'name', 'company')}
+                # Clean the supplied name even if we don't enrich
+                if c.get('name'):
+                    parsed = clean_name(c['name'])
+                    if parsed['is_business']:
+                        if not c.get('company'):
+                            c['company'] = parsed['full_name']
+                        c['name'] = None  # don't use a business name as person name
+                    else:
+                        c['name'] = parsed['full_name']
+                        if parsed['first_name']:
+                            c['first_name'] = parsed['first_name']
+                        if parsed['last_name']:
+                            c['last_name'] = parsed['last_name']
+
+                # Enrich from leads DB (looks up owner_contacts by email,
+                # fuzzy-matches permits by owner name)
+                if enrich:
+                    enriched = enrich_contact_from_leads(email, c)
+                    had_new_keys = any(
+                        k not in c and enriched.get(k)
+                        for k in ('recent_address', 'recent_borough', 'permit_count', 'company')
+                    )
+                    if had_new_keys:
+                        stats['enriched_count'] += 1
+                    c = enriched
+
+                extra = {k: v for k, v in c.items()
+                         if k not in ('email', 'name', 'company') and v is not None}
                 ab = random.choice(['A', 'B']) if has_ab else None
 
                 enrollment = EmailEnrollment(
@@ -241,10 +292,10 @@ class EmailCampaignService:
                 )
                 session.add(enrollment)
                 seen.add(email)
-                enrolled += 1
+                stats['enrolled'] += 1
 
             session.commit()
-            return enrolled
+            return stats
         finally:
             session.close()
 

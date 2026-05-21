@@ -689,36 +689,325 @@ def poll_replies_all_accounts() -> int:
 
 
 # =============================================================================
+# NAME CLEANING (uses python `nameparser`, same library typically used in
+# scraper / Apify pipelines for handling weird name formats)
+# =============================================================================
+
+_BUSINESS_MARKERS = (
+    ' LLC', ' L.L.C', ' INC', ' INC.', ' CORP', ' CORPORATION', ' CO.', ' CO,',
+    ' LTD', ' L.P.', ' LP', ' LLP', ' COMPANY', ' HOLDINGS', ' GROUP',
+    ' ASSOCIATES', ' ASSOC', ' PARTNERS', ' ENTERPRISES', ' SOLUTIONS',
+    ' SERVICES', ' CONSTRUCTION', ' BUILDERS', ' DEVELOPERS', ' MANAGEMENT',
+    ' REALTY', ' PROPERTIES', ' CONTRACTORS', ' CONTRACTING',
+)
+
+
+def _looks_like_business(raw: str) -> bool:
+    if not raw:
+        return False
+    up = ' ' + raw.upper().strip()
+    return any(m in up for m in _BUSINESS_MARKERS)
+
+
+def clean_name(raw: Optional[str]) -> Dict[str, Optional[str]]:
+    """
+    Parse a raw name string into structured parts. Handles:
+      - "JOHN SMITH" (all caps) -> "John Smith"
+      - "Smith, John P." (comma-separated)
+      - "Mr. John Q. Smith Jr." (titles + suffixes)
+      - "ABC CONSTRUCTION LLC" -> recognized as business, kept as-is
+      - "John & Jane Smith" -> primary contact
+
+    Returns dict with: full_name, first_name, last_name, is_business
+    All fields can be None.
+    """
+    if not raw or not str(raw).strip():
+        return {'full_name': None, 'first_name': None, 'last_name': None, 'is_business': False}
+
+    raw_s = str(raw).strip()
+    is_biz = _looks_like_business(raw_s)
+
+    if is_biz:
+        # Preserve canonical business suffix casing (LLC, INC, LP, ...)
+        # Title-case everything else, then patch suffixes back to upper-case.
+        cased = raw_s.title()
+        for suf in ('Llc', 'L.L.C', 'Inc', 'Inc.', 'Corp', 'Co.', 'Co,', 'Ltd',
+                    'L.P.', 'Lp', 'Llp', 'P.C.', 'Pc'):
+            cased = cased.replace(' ' + suf, ' ' + suf.upper())
+        # Also fix any "Llc" at end of string after a comma
+        if cased.endswith(' Llc'):
+            cased = cased[:-4] + ' LLC'
+        return {
+            'full_name': cased,
+            'first_name': None,
+            'last_name': None,
+            'is_business': True,
+        }
+
+    # Person name — normalize to Title Case regardless of input casing
+    cased = raw_s.title() if (raw_s.isupper() or raw_s.islower()) else raw_s
+
+    try:
+        from nameparser import HumanName
+        # nameparser handles "Smith, John" / titles / suffixes / Jr-III
+        n = HumanName(cased)
+        first = (n.first or '').strip() or None
+        last = (n.last or '').strip() or None
+        middle = (n.middle or '').strip()
+        title = (n.title or '').strip()
+        suffix = (n.suffix or '').strip()
+
+        # Drop "&" splits — take the first person if it's a multi-owner name
+        if first and '&' in first:
+            first = first.split('&')[0].strip()
+        if last and '&' in last:
+            last = last.split('&')[0].strip()
+
+        # Reassemble cleanly
+        parts = [title, first, middle, last, suffix]
+        full = ' '.join(p for p in parts if p).strip() or cased
+
+        return {
+            'full_name': full,
+            'first_name': first,
+            'last_name': last,
+            'is_business': False,
+        }
+    except Exception as e:
+        logger.debug(f"nameparser failed on {raw_s!r}: {e}")
+        # Fallback: best-effort first token as first name
+        tokens = cased.split()
+        return {
+            'full_name': cased,
+            'first_name': tokens[0] if tokens else None,
+            'last_name': tokens[-1] if len(tokens) > 1 else None,
+            'is_business': False,
+        }
+
+
+# =============================================================================
+# CONTACT ENRICHMENT (from leads DB)
+# =============================================================================
+
+def enrich_contact_from_leads(email: str, current_data: dict) -> dict:
+    """
+    Given an email + whatever data the user supplied, look up the leads DB
+    (owner_contacts + permits) and merge in anything we know:
+      - owner_name -> name (if user didn't provide one)
+      - phone
+      - most recent permit address, borough, permit_no, job_type, work_type
+      - permit_count (how many permits this owner has)
+      - owner_business_name -> company
+
+    Never overwrites user-provided data. Always cleans names via clean_name().
+    Safe to call in a loop — fails gracefully if the leads DB is unavailable.
+    """
+    enriched = dict(current_data or {})
+
+    if not email or '@' not in email:
+        return enriched
+
+    try:
+        # Lazy import to avoid circular dep at module load
+        from leads_service import get_leads_engine
+        from sqlalchemy import text as _text
+
+        engine = get_leads_engine()
+        with engine.connect() as conn:
+            # 1. Look up owner_contacts by email (case-insensitive)
+            oc_row = conn.execute(_text("""
+                SELECT owner_name, phone, phone_type, source, confidence
+                FROM owner_contacts
+                WHERE LOWER(email) = LOWER(:email)
+                ORDER BY confidence DESC NULLS LAST, created_at DESC
+                LIMIT 1
+            """), {'email': email}).fetchone()
+
+            owner_name_raw = None
+            if oc_row:
+                oc = dict(oc_row._mapping)
+                owner_name_raw = oc.get('owner_name')
+
+                if not enriched.get('phone') and oc.get('phone'):
+                    enriched['phone'] = oc['phone']
+                if oc.get('source'):
+                    enriched.setdefault('lead_source', oc['source'])
+
+            # 2. Clean the name if we have one (from either source)
+            best_name = enriched.get('name') or owner_name_raw
+            if best_name:
+                parsed = clean_name(best_name)
+                if parsed['is_business']:
+                    # If the "name" looks like a business, promote it
+                    if not enriched.get('company'):
+                        enriched['company'] = parsed['full_name']
+                    # Don't store a business as the person's name
+                    if enriched.get('name') and _looks_like_business(enriched['name']):
+                        enriched['name'] = None
+                else:
+                    enriched['name'] = parsed['full_name']
+                    if parsed['first_name']:
+                        enriched['first_name'] = parsed['first_name']
+                    if parsed['last_name']:
+                        enriched['last_name'] = parsed['last_name']
+
+            # 3. Fuzzy-match permits to grab project context
+            #    Use the owner_name (raw, since permits use the same source) for matching
+            permit_query_name = owner_name_raw or enriched.get('name') or enriched.get('company')
+            if permit_query_name and len(permit_query_name) > 3:
+                try:
+                    permits = conn.execute(_text("""
+                        SELECT permit_no, address, borough, nta_name,
+                               job_type, work_type, permit_type, permit_status,
+                               bldg_type, residential,
+                               owner_business_name, issuance_date
+                        FROM permits
+                        WHERE owner_business_name ILIKE :pattern
+                          AND owner_business_name IS NOT NULL
+                        ORDER BY issuance_date DESC NULLS LAST
+                        LIMIT 5
+                    """), {'pattern': f'%{permit_query_name}%'}).fetchall()
+
+                    if permits:
+                        permit_dicts = [dict(p._mapping) for p in permits]
+                        most_recent = permit_dicts[0]
+
+                        if not enriched.get('company') and most_recent.get('owner_business_name'):
+                            enriched['company'] = most_recent['owner_business_name']
+
+                        enriched['recent_permit_no'] = most_recent.get('permit_no')
+                        enriched['recent_address'] = most_recent.get('address')
+                        enriched['recent_borough'] = most_recent.get('borough')
+                        enriched['recent_neighborhood'] = most_recent.get('nta_name')
+                        enriched['recent_job_type'] = most_recent.get('job_type')
+                        enriched['recent_work_type'] = most_recent.get('work_type')
+                        enriched['recent_permit_status'] = most_recent.get('permit_status')
+                        if most_recent.get('issuance_date'):
+                            enriched['recent_permit_date'] = str(most_recent['issuance_date'])
+                        enriched['permit_count'] = len(permit_dicts)
+
+                        # If multiple boroughs, note that
+                        boroughs = list({p.get('borough') for p in permit_dicts if p.get('borough')})
+                        if len(boroughs) > 1:
+                            enriched['active_boroughs'] = ', '.join(boroughs)
+                except Exception as perm_e:
+                    logger.debug(f"Permit lookup failed for {permit_query_name!r}: {perm_e}")
+
+    except Exception as e:
+        logger.debug(f"Enrichment failed for {email!r}: {e}")
+
+    return enriched
+
+
+# =============================================================================
 # AI PERSONALIZATION
 # =============================================================================
+
+# Job type / work type human readouts so AI gets context it can riff on
+_JOB_TYPE_LABELS = {
+    'A1': 'major alteration', 'A2': 'minor alteration', 'A3': 'cosmetic alteration',
+    'NB': 'new building', 'DM': 'demolition', 'SG': 'sign permit',
+}
+_WORK_TYPE_LABELS = {
+    'OT': 'general work', 'PL': 'plumbing', 'EQ': 'equipment', 'MH': 'HVAC',
+    'SP': 'sprinkler', 'FP': 'fire protection', 'BL': 'boiler', 'SD': 'standpipe',
+}
+
+
+def _humanize_context(data: dict) -> str:
+    """Turn the enrichment dict into a brief, AI-friendly context block."""
+    lines = []
+    name = data.get('first_name') or data.get('name')
+    if name and not _looks_like_business(name):
+        lines.append(f"- recipient: {name}")
+    if data.get('company'):
+        lines.append(f"- company: {data['company']}")
+    if data.get('recent_borough') or data.get('recent_neighborhood'):
+        loc = data.get('recent_neighborhood') or data.get('recent_borough')
+        if data.get('recent_borough') and data.get('recent_neighborhood'):
+            loc = f"{data['recent_neighborhood']} ({data['recent_borough']})"
+        lines.append(f"- most recent project location: {loc}")
+    if data.get('recent_address'):
+        lines.append(f"- most recent project address: {data['recent_address']}")
+    if data.get('recent_job_type'):
+        jt = _JOB_TYPE_LABELS.get(data['recent_job_type'], data['recent_job_type'])
+        lines.append(f"- most recent project type: {jt}")
+    if data.get('recent_work_type'):
+        wt = _WORK_TYPE_LABELS.get(data['recent_work_type'], data['recent_work_type'])
+        lines.append(f"- work category: {wt}")
+    if data.get('recent_permit_date'):
+        lines.append(f"- most recent permit date: {data['recent_permit_date']}")
+    if data.get('permit_count') and data['permit_count'] > 1:
+        lines.append(f"- total permits on file: {data['permit_count']}")
+    if data.get('active_boroughs'):
+        lines.append(f"- active across: {data['active_boroughs']}")
+    # Anything else the CSV provided (skip already-rendered keys)
+    skip = {'email', 'name', 'first_name', 'last_name', 'company', 'phone',
+            'recent_borough', 'recent_neighborhood', 'recent_address',
+            'recent_job_type', 'recent_work_type', 'recent_permit_date',
+            'permit_count', 'active_boroughs', 'recent_permit_no',
+            'recent_permit_status', 'lead_source'}
+    for k, v in data.items():
+        if k in skip or not v:
+            continue
+        lines.append(f"- {k}: {v}")
+    return '\n'.join(lines) if lines else '- (no additional context)'
+
+
+# Default opener prompt used when the user leaves the prompt field blank
+DEFAULT_AI_PROMPT = (
+    "Write a one-line, lowercase, observational opener for a NYC construction-services "
+    "cold email. Reference the recipient's most recent permit / project when possible. "
+    "Keep it concrete and human — never sycophantic."
+)
+
 
 def generate_ai_first_line(prompt_template: str, enrollment_data: dict) -> Optional[str]:
     """
     Use Anthropic to generate a personalized one-liner opener.
-    Returns plain text or None on failure.
+    Returns plain text, or empty string on SKIP, or None on hard failure.
+    Output is validated — meta-responses ("I don't have access...", "could you provide...")
+    are detected and rejected.
     """
     if not Config.ANTHROPIC_API_KEY:
         return None
+
     try:
-        # Lazy import — anthropic is optional
         import anthropic
         client = anthropic.Anthropic(api_key=Config.ANTHROPIC_API_KEY)
 
-        # Render any {variables} in the prompt template
-        context_lines = []
-        for k, v in enrollment_data.items():
-            if v:
-                context_lines.append(f"- {k}: {v}")
-        context_block = '\n'.join(context_lines)
+        context_block = _humanize_context(enrollment_data)
 
         system = (
-            "You write personalized cold-email opening lines for B2B outreach in NYC construction/permits. "
-            "Output ONLY the one-line opener — no greeting, no quotes, no preamble, no follow-up sentence. "
-            "Keep it under 20 words, specific, observational, and human. Never use the word 'hope'."
+            "You write one-line opening hooks for B2B cold emails. Your output replaces "
+            "the {ai_first_line} token inside a templated email.\n\n"
+            "ABSOLUTE RULES:\n"
+            "- Output exactly ONE short sentence (under 22 words). Plain text only — no quotes, "
+            "no greeting, no signoff, no preamble, no markdown.\n"
+            "- Use whatever recipient context is provided. If it is sparse, riff on whatever "
+            "IS there (name, email domain, company) — DO NOT ask for more information.\n"
+            "- NEVER mention what you don't know. NEVER apologize. NEVER explain your reasoning. "
+            "NEVER say 'I don't have', 'could you provide', 'I'd need', or 'I cannot'.\n"
+            "- If after all that you genuinely cannot write anything natural, output the single "
+            "literal word: SKIP\n"
+            "- Tone: a real person who did 30 seconds of research. Observational. Specific. "
+            "Lowercase okay. Conversational. Never sycophantic. Never use the word 'hope'.\n\n"
+            "GOOD examples:\n"
+            "  noticed your team pulled a permit on east 86th last month\n"
+            "  saw the tribeca alteration job — looked like a tricky one\n"
+            "  your group has been busy in the bronx this year\n"
+            "  came across [company] while looking at NB filings\n\n"
+            "BAD examples (never output these):\n"
+            "  I don't have specific permit data for this contact\n"
+            "  Could you provide more details so I can craft a specific opener?\n"
+            "  Hope this finds you well\n"
+            "  I'd need company name and recent projects to write something accurate"
         )
+
         user_prompt = (
-            (prompt_template or "Write a one-line personalized opener based on this contact.")
-            + f"\n\nContact data:\n{context_block}"
+            (prompt_template or DEFAULT_AI_PROMPT).strip()
+            + "\n\nRecipient context:\n"
+            + context_block
         )
 
         resp = client.messages.create(
@@ -728,8 +1017,42 @@ def generate_ai_first_line(prompt_template: str, enrollment_data: dict) -> Optio
             messages=[{'role': 'user', 'content': user_prompt}],
         )
         text = ''.join(b.text for b in resp.content if hasattr(b, 'text')).strip()
-        # Strip stray quotes if model added them
-        return text.strip('"“”\'').strip()
+
+        # Validate output — reject meta-responses
+        if _is_meta_response(text):
+            logger.info(f"AI produced meta-response, returning empty: {text[:120]!r}")
+            return ''
+        if text.upper().strip() == 'SKIP':
+            return ''
+
+        # Clean up: strip quotes, leading conjunctions
+        text = text.strip('"“”\'').strip()
+        # Strip trailing periods that double up with template punctuation
+        return text
     except Exception as e:
         logger.warning(f"AI personalization failed: {e}")
         return None
+
+
+def _is_meta_response(text: str) -> bool:
+    """Detect when the AI confessed instead of writing an opener."""
+    if not text:
+        return True
+    t = text.lower()
+    bad_phrases = [
+        "i don't have", "i do not have", "i'd need", "i would need",
+        "could you provide", "could you share", "please provide",
+        "i cannot", "i can't write", "i'm unable", "i am unable",
+        "without more", "to craft", "to write an accurate",
+        "more details", "more information", "more context",
+        "based on the limited", "with the limited",
+    ]
+    if any(p in t for p in bad_phrases):
+        return True
+    # Multi-sentence responses with question marks are usually clarifying questions
+    if t.count('?') >= 1 and len(text) > 60:
+        return True
+    # Bullet lists or multi-line prose
+    if text.count('\n') > 0 and ('-' in text or '•' in text):
+        return True
+    return False

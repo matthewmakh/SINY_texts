@@ -819,7 +819,14 @@
       const er = await api(`/api/email/campaigns/${campaignId}/enroll`, {
         method: 'POST', body: JSON.stringify({ contacts: allNew }),
       });
-      if (er.success) toast(`Enrolled ${er.enrolled} contacts`, 'success');
+      if (er.success) {
+        const s = er.stats || {};
+        const parts = [`Enrolled ${s.enrolled || er.enrolled} contacts`];
+        if (s.enriched_count) parts.push(`${s.enriched_count} enriched from leads DB`);
+        const skipped = (s.skipped_duplicate || 0) + (s.skipped_invalid || 0) + (s.skipped_unsubscribed || 0);
+        if (skipped) parts.push(`${skipped} skipped (dup/invalid/unsub)`);
+        toast(parts.join(' · '), 'success');
+      }
     }
 
     if (launchAfter) {
@@ -846,8 +853,15 @@
       method: 'POST', body: JSON.stringify({ use_filters: true }),
     });
     if (r.success) {
-      document.getElementById('ec-enrollment-stats').textContent = `Enrolled ${r.enrolled} from leads DB`;
-      toast(`Enrolled ${r.enrolled} contacts from leads database`, 'success');
+      const s = r.stats || {};
+      const wrap = document.getElementById('ec-enrollment-stats');
+      wrap.className = 'enrollment-feedback';
+      wrap.innerHTML = `
+        <strong>${s.enrolled || r.enrolled} contacts enrolled</strong> from leads DB.
+        ${s.enriched_count ? ` <span>${s.enriched_count} got extra permit/owner context</span>` : ''}
+        ${(s.skipped_duplicate + s.skipped_unsubscribed + s.skipped_invalid) > 0 ? `<div class="skipped">Skipped: ${s.skipped_duplicate || 0} duplicate, ${s.skipped_unsubscribed || 0} unsubscribed, ${s.skipped_invalid || 0} invalid</div>` : ''}
+      `;
+      toast(`Enrolled ${s.enrolled || r.enrolled} contacts`, 'success');
     } else {
       toast(r.error || 'Pull failed', 'error');
     }
@@ -892,6 +906,55 @@
     document.getElementById('ec-ai-toggle')?.addEventListener('change', e => {
       document.getElementById('ec-ai-prompt-wrap').style.display = e.target.checked ? 'block' : 'none';
     });
+    document.getElementById('ec-ai-preview-btn')?.addEventListener('click', previewAIOpener);
+  }
+
+  async function previewAIOpener() {
+    const email = document.getElementById('ec-ai-preview-email').value.trim();
+    const prompt = document.getElementById('ec-ai-prompt').value.trim();
+    const wrap = document.getElementById('ec-ai-preview-result');
+
+    if (!email || !email.includes('@')) {
+      toast('Enter an email to test with', 'error');
+      return;
+    }
+
+    wrap.style.display = 'block';
+    wrap.className = 'ai-preview-result';
+    wrap.innerHTML = '<div class="muted">Generating preview…</div>';
+
+    const data = await api('/api/email/preview-opener', {
+      method: 'POST',
+      body: JSON.stringify({ prompt, sample_email: email }),
+    });
+
+    if (!data.success) {
+      wrap.className = 'ai-preview-result empty';
+      wrap.innerHTML = `<div><strong>Error:</strong> ${escapeHtml(data.error || 'Unknown')}</div>`;
+      if (data.context) {
+        wrap.innerHTML += `<div class="ai-preview-result-context">Context that would be sent:\n${escapeHtml(JSON.stringify(data.context, null, 2))}</div>`;
+      }
+      return;
+    }
+
+    const ctx = data.context || {};
+    const ctxText = JSON.stringify(ctx, null, 2);
+    const enrichedKeys = Object.keys(ctx).filter(k => k.startsWith('recent_') || k === 'permit_count' || k === 'active_boroughs');
+
+    if (data.is_empty) {
+      wrap.className = 'ai-preview-result empty';
+      wrap.innerHTML = `
+        <div><strong>⚠ AI returned empty</strong> — the recipient had too little context, so {ai_first_line} will be blank in the email.</div>
+        <div class="muted" style="margin-top:4px">Either remove {ai_first_line} from your body, or add more enriched data (try uploading a CSV with permit details).</div>
+        <div class="ai-preview-result-context">${escapeHtml(ctxText)}</div>
+      `;
+    } else {
+      wrap.innerHTML = `
+        <div class="ai-preview-result-opener">"${escapeHtml(data.opener)}"</div>
+        <div class="muted" style="font-size:12px">${enrichedKeys.length > 0 ? `✓ Found ${enrichedKeys.length} enrichment fields from your leads DB` : '⚠ No enrichment from leads DB — opener written from email alone'}</div>
+        <div class="ai-preview-result-context">${escapeHtml(ctxText)}</div>
+      `;
+    }
   }
 
   // Public API

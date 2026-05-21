@@ -10,3 +10,4 @@ phonenumbers
 python-dateutil==2.8.2
 requests==2.32.3
 anthropic>=0.40.0
+nameparser==1.1.3

@@ -491,8 +491,13 @@
                             </label>
                             <div id="ec-ai-prompt-wrap" class="form-group" style="display:none">
                                 <label>Personalization prompt</label>
-                                <textarea id="ec-ai-prompt" rows="3" placeholder="Example: Write a one-line opener referencing the recipient's most recent permit work in NYC. Keep it observational, not flattering."></textarea>
+                                <textarea id="ec-ai-prompt" rows="3" placeholder="Leave blank to use the default NYC-construction prompt, or describe your own."></textarea>
                                 <small class="muted">Tip: be specific about tone and length. Short, observational openers convert best.</small>
+                                <div class="ai-preview-row">
+                                    <input type="text" id="ec-ai-preview-email" placeholder="Test with email (e.g. someone@company.com)">
+                                    <button type="button" class="btn btn-secondary btn-sm" id="ec-ai-preview-btn">Preview opener</button>
+                                </div>
+                                <div id="ec-ai-preview-result" class="ai-preview-result" style="display:none"></div>
                             </div>
                         </div>
 
