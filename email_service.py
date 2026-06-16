@@ -537,6 +537,69 @@ def send_campaign_step(send_id: int) -> dict:
 # REPLY DETECTION (Gmail History API polling)
 # =============================================================================
 
+def _decode_b64url(data: str) -> str:
+    """Decode Gmail's URL-safe base64 body data to text."""
+    if not data:
+        return ''
+    try:
+        padded = data + '=' * (-len(data) % 4)
+        return base64.urlsafe_b64decode(padded.encode('ascii')).decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+def _extract_message_bodies(payload: dict) -> Tuple[str, str]:
+    """
+    Walk a Gmail message payload (recursively through multipart) and return
+    (text_plain, text_html). Either may be empty.
+    """
+    text_plain, text_html = '', ''
+
+    def walk(part):
+        nonlocal text_plain, text_html
+        if not part:
+            return
+        mime = part.get('mimeType', '')
+        body = part.get('body', {}) or {}
+        data = body.get('data')
+        if mime == 'text/plain' and data and not text_plain:
+            text_plain = _decode_b64url(data)
+        elif mime == 'text/html' and data and not text_html:
+            text_html = _decode_b64url(data)
+        for sub in part.get('parts', []) or []:
+            walk(sub)
+
+    walk(payload)
+    return text_plain, text_html
+
+
+# Quote-stripping: trim the replied-to history so the inbox shows just the new text
+_QUOTE_MARKERS = (
+    'On ', '-----Original Message-----', '________________________________',
+    'wrote:', 'From:', 'Sent from my',
+)
+
+
+def _strip_quoted_text(text: str) -> str:
+    """Best-effort removal of quoted reply history from a plain-text body."""
+    if not text:
+        return ''
+    lines = text.splitlines()
+    out = []
+    for line in lines:
+        stripped = line.strip()
+        # Gmail-style "On <date>, <person> wrote:" boundary
+        if stripped.startswith('On ') and stripped.endswith('wrote:'):
+            break
+        if stripped.startswith('>'):
+            break
+        if stripped in ('-----Original Message-----', '________________________________'):
+            break
+        out.append(line)
+    result = '\n'.join(out).strip()
+    return result or text.strip()
+
+
 def poll_replies_for_account(account_id: int) -> int:
     """
     Fetch new inbound messages for one account since its stored history_id.
@@ -587,14 +650,21 @@ def poll_replies_for_account(account_id: int) -> int:
 
         for gmail_id in new_message_ids:
             try:
+                # Skip if we already recorded this message
+                existing = session.query(EmailReply).filter(EmailReply.gmail_message_id == gmail_id).first()
+                if existing:
+                    continue
+
+                # Fetch the full message so we capture the actual body, not just metadata
                 m_resp = requests.get(
-                    f'{GMAIL_API_BASE}/messages/{gmail_id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=In-Reply-To&metadataHeaders=References',
-                    headers=headers, timeout=15,
+                    f'{GMAIL_API_BASE}/messages/{gmail_id}?format=full',
+                    headers=headers, timeout=20,
                 )
                 if not m_resp.ok:
                     continue
                 m_data = m_resp.json()
-                headers_list = (m_data.get('payload') or {}).get('headers') or []
+                payload = m_data.get('payload') or {}
+                headers_list = payload.get('headers') or []
                 hdr = {h['name'].lower(): h['value'] for h in headers_list}
                 from_raw = hdr.get('from', '')
                 from_name, from_email = parseaddr(from_raw)
@@ -604,9 +674,14 @@ def poll_replies_for_account(account_id: int) -> int:
                 thread_id = m_data.get('threadId')
 
                 if not from_email or from_email == account.email.lower():
-                    continue  # skip own messages
+                    continue  # skip our own outbound messages
 
-                # Match enrollment by thread or by sender
+                body_text, body_html = _extract_message_bodies(payload)
+                clean_text = _strip_quoted_text(body_text) if body_text else ''
+
+                now = datetime.utcnow()
+
+                # Match enrollment by thread first, then by sender
                 enrollment = None
                 if thread_id:
                     enrollment = session.query(EmailEnrollment).filter(
@@ -617,40 +692,73 @@ def poll_replies_for_account(account_id: int) -> int:
                         EmailEnrollment.email == from_email
                     ).order_by(EmailEnrollment.last_sent_at.desc()).first()
 
-                # Detect auto-replies
-                is_auto = False
+                # Classify auto-reply vs bounce vs real reply
                 subj_lower = (subject or '').lower()
-                if any(k in subj_lower for k in ['out of office', 'auto-reply', 'auto reply', 'autoreply', 'vacation', 'delivery status notification', 'undeliverable', 'mail delivery failed']):
-                    is_auto = True
+                is_bounce = any(k in subj_lower for k in [
+                    'undeliverable', 'delivery status notification', 'mail delivery failed',
+                    'returned mail', 'failure notice', 'delivery has failed',
+                ])
+                is_auto = is_bounce or any(k in subj_lower for k in [
+                    'out of office', 'auto-reply', 'auto reply', 'autoreply',
+                    'automatic reply', 'vacation',
+                ])
 
-                # Save reply
-                existing = session.query(EmailReply).filter(EmailReply.gmail_message_id == gmail_id).first()
-                if not existing:
-                    reply = EmailReply(
-                        account_id=account.id,
-                        enrollment_id=enrollment.id if enrollment else None,
-                        campaign_id=enrollment.campaign_id if enrollment else None,
-                        gmail_message_id=gmail_id,
-                        gmail_thread_id=thread_id,
-                        from_email=from_email,
-                        from_name=from_name,
-                        subject=subject,
-                        snippet=snippet,
-                        is_auto_reply=is_auto,
-                    )
-                    session.add(reply)
-                    new_count += 1
+                reply = EmailReply(
+                    account_id=account.id,
+                    enrollment_id=enrollment.id if enrollment else None,
+                    campaign_id=enrollment.campaign_id if enrollment else None,
+                    gmail_message_id=gmail_id,
+                    gmail_thread_id=thread_id,
+                    from_email=from_email,
+                    from_name=from_name,
+                    subject=subject,
+                    snippet=snippet,
+                    body_text=clean_text or body_text,
+                    body_html=body_html or None,
+                    is_auto_reply=is_auto,
+                )
+                session.add(reply)
+                new_count += 1
 
-                # Stop sequence on real reply
-                if enrollment and not is_auto and not enrollment.first_reply_at:
-                    enrollment.first_reply_at = datetime.utcnow()
-                    enrollment.status = EnrollmentStatus.ENGAGED.value
+                if not enrollment:
+                    continue
 
-                # Detect bounce / delivery failure on enrollment
-                if enrollment and is_auto and any(k in subj_lower for k in ['undeliverable', 'delivery status', 'mail delivery failed']):
-                    enrollment.bounced_at = datetime.utcnow()
-                    enrollment.status = 'bounced'
+                # Find the most recent send to this enrollment so we can attribute
+                # the reply/bounce at the message level (powers per-step + A/B stats)
+                last_send = session.query(EmailSend).filter(
+                    EmailSend.enrollment_id == enrollment.id,
+                    EmailSend.status == 'sent',
+                ).order_by(EmailSend.sent_at.desc()).first()
+
+                if is_bounce:
+                    if not enrollment.bounced_at:
+                        enrollment.bounced_at = now
+                        enrollment.status = 'bounced'
+                    if last_send and not last_send.bounced_at:
+                        last_send.bounced_at = now
+                        last_send.status = 'bounced'
                     account.bounce_count_7d = (account.bounce_count_7d or 0) + 1
+                    session.add(EmailEvent(
+                        send_id=last_send.id if last_send else None,
+                        enrollment_id=enrollment.id,
+                        campaign_id=enrollment.campaign_id,
+                        event_type='bounce',
+                    ))
+                    _apply_bounce_guardrail(account, session)
+
+                elif not is_auto:
+                    # Real human reply — stop the sequence and attribute to the send
+                    if not enrollment.first_reply_at:
+                        enrollment.first_reply_at = now
+                        enrollment.status = EnrollmentStatus.ENGAGED.value
+                    if last_send and not last_send.replied_at:
+                        last_send.replied_at = now
+                    session.add(EmailEvent(
+                        send_id=last_send.id if last_send else None,
+                        enrollment_id=enrollment.id,
+                        campaign_id=enrollment.campaign_id,
+                        event_type='reply',
+                    ))
 
             except Exception as inner_e:
                 logger.warning(f"Failed to process reply {gmail_id}: {inner_e}")
@@ -664,6 +772,136 @@ def poll_replies_for_account(account_id: int) -> int:
         logger.exception(f"poll_replies_for_account({account_id}) error")
         session.rollback()
         return 0
+    finally:
+        session.close()
+
+
+def _apply_bounce_guardrail(account: EmailAccount, session) -> None:
+    """
+    If the account's trailing-7-day bounce rate exceeds its configured threshold
+    (with a minimum sample size), auto-pause it so we stop torching the domain.
+    """
+    threshold = account.bounce_pause_threshold or 8
+    window_start = datetime.utcnow() - timedelta(days=7)
+
+    sent_7d = session.query(EmailSend).filter(
+        EmailSend.account_id == account.id,
+        EmailSend.sent_at >= window_start,
+    ).count()
+
+    # Need a meaningful sample before acting
+    if sent_7d < 20:
+        return
+
+    bounced_7d = session.query(EmailSend).filter(
+        EmailSend.account_id == account.id,
+        EmailSend.sent_at >= window_start,
+        EmailSend.bounced_at.isnot(None),
+    ).count()
+
+    rate = (bounced_7d / sent_7d * 100) if sent_7d else 0
+    if rate >= threshold and account.status == EmailAccountStatus.ACTIVE.value:
+        account.status = EmailAccountStatus.PAUSED.value
+        account.auto_paused = True
+        account.last_error = (
+            f"Auto-paused: bounce rate {rate:.1f}% over last 7d "
+            f"({bounced_7d}/{sent_7d}) exceeded {threshold}% threshold"
+        )
+        logger.warning(f"Auto-paused {account.email} — bounce rate {rate:.1f}%")
+
+
+def fetch_thread(account_id: int, thread_id: str) -> dict:
+    """
+    Fetch a full Gmail thread (all messages) for the unified-inbox thread view.
+    Returns {success, messages: [{from, to, date, subject, body_html, body_text, is_outbound}], error}.
+    """
+    session = get_session()
+    try:
+        account = session.query(EmailAccount).filter(EmailAccount.id == account_id).first()
+        if not account:
+            return {'success': False, 'error': 'account not found'}
+        access_token = ensure_access_token(account, session)
+        own_email = account.email.lower()
+    finally:
+        session.close()
+
+    try:
+        resp = requests.get(
+            f'{GMAIL_API_BASE}/threads/{thread_id}?format=full',
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=25,
+        )
+        if not resp.ok:
+            return {'success': False, 'error': f'{resp.status_code}: {resp.text[:300]}'}
+        data = resp.json()
+        messages = []
+        for m in data.get('messages', []):
+            payload = m.get('payload') or {}
+            hdrs = {h['name'].lower(): h['value'] for h in (payload.get('headers') or [])}
+            from_raw = hdrs.get('from', '')
+            from_name, from_email = parseaddr(from_raw)
+            body_text, body_html = _extract_message_bodies(payload)
+            is_outbound = (from_email or '').lower() == own_email
+            messages.append({
+                'from_name': from_name,
+                'from_email': from_email,
+                'to': hdrs.get('to', ''),
+                'date': hdrs.get('date', ''),
+                'subject': hdrs.get('subject', ''),
+                'snippet': m.get('snippet', ''),
+                'body_text': body_text,
+                'body_html': body_html,
+                'is_outbound': is_outbound,
+            })
+        return {'success': True, 'messages': messages, 'thread_id': thread_id}
+    except Exception as e:
+        logger.exception("fetch_thread error")
+        return {'success': False, 'error': str(e)}
+
+
+def send_reply(account_id: int, *, to_email: str, subject: str, body_text: str,
+               thread_id: str = None, in_reply_to: str = None) -> dict:
+    """
+    Send a human-written reply in-thread from the connected mailbox.
+    Used by the in-app inbox composer. Marks the EmailReply as replied_to.
+    """
+    session = get_session()
+    try:
+        account = session.query(EmailAccount).filter(EmailAccount.id == account_id).first()
+        if not account:
+            return {'success': False, 'error': 'account not found'}
+
+        # Build an HTML body from the plain text the operator typed
+        safe_html = (body_text or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        html_body = '<div style="font-family:Arial,sans-serif;white-space:pre-wrap">' + safe_html + '</div>'
+
+        reply_subject = subject or ''
+        if reply_subject and not reply_subject.lower().startswith('re:'):
+            reply_subject = 'Re: ' + reply_subject
+
+        result = send_email_via_gmail(
+            account=account,
+            to_email=to_email,
+            subject=reply_subject,
+            html_body=html_body,
+            text_body=body_text,
+            thread_id=thread_id,
+            in_reply_to=in_reply_to,
+            references=in_reply_to,
+            session=session,
+        )
+        if result.get('success'):
+            # Mark any matching inbound replies in this thread as answered
+            if thread_id:
+                session.query(EmailReply).filter(
+                    EmailReply.gmail_thread_id == thread_id
+                ).update({EmailReply.replied_to: True})
+            session.commit()
+        return result
+    except Exception as e:
+        logger.exception("send_reply error")
+        session.rollback()
+        return {'success': False, 'error': str(e)}
     finally:
         session.close()
 

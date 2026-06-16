@@ -1335,6 +1335,7 @@ from email_service import (
     build_oauth_url, connect_account_from_code,
     add_unsubscribe, is_unsubscribed,
     poll_replies_for_account, GMAIL_SCOPES,
+    fetch_thread, send_reply,
 )
 from database import (
     EmailAccount, EmailAccountStatus,
@@ -1678,6 +1679,78 @@ def mark_reply_read(reply_id):
         return jsonify({'success': True})
     finally:
         session.close()
+
+
+@app.route('/api/email/inbox/<int:reply_id>', methods=['GET'])
+@login_required
+def get_reply_detail(reply_id):
+    """Return a single reply with its full body, and mark it read."""
+    session = get_session()
+    try:
+        r = session.query(EmailReply).filter(EmailReply.id == reply_id).first()
+        if not r:
+            return jsonify({'success': False, 'error': 'Not found'}), 404
+        if not r.read:
+            r.read = True
+            session.commit()
+        return jsonify({'success': True, 'reply': r.to_dict(include_body=True)})
+    finally:
+        session.close()
+
+
+@app.route('/api/email/threads/<thread_id>', methods=['GET'])
+@login_required
+def get_email_thread(thread_id):
+    """Fetch the full Gmail thread (all messages) for the thread view."""
+    account_id = request.args.get('account_id', type=int)
+    if not account_id:
+        # Fall back to the account on the reply, if a reply_id is given
+        reply_id = request.args.get('reply_id', type=int)
+        if reply_id:
+            session = get_session()
+            try:
+                r = session.query(EmailReply).filter(EmailReply.id == reply_id).first()
+                if r:
+                    account_id = r.account_id
+            finally:
+                session.close()
+    if not account_id:
+        return jsonify({'success': False, 'error': 'account_id required'}), 400
+    result = fetch_thread(account_id, thread_id)
+    status = 200 if result.get('success') else 502
+    return jsonify(result), status
+
+
+@app.route('/api/email/inbox/<int:reply_id>/reply', methods=['POST'])
+@login_required
+def reply_to_inbox_message(reply_id):
+    """Send a human-written reply in-thread from the connected mailbox."""
+    data = request.json or {}
+    body = (data.get('body') or '').strip()
+    if not body:
+        return jsonify({'success': False, 'error': 'Reply body is required'}), 400
+
+    session = get_session()
+    try:
+        r = session.query(EmailReply).filter(EmailReply.id == reply_id).first()
+        if not r:
+            return jsonify({'success': False, 'error': 'Not found'}), 404
+        account_id = r.account_id
+        to_email = r.from_email
+        subject = r.subject or ''
+        thread_id = r.gmail_thread_id
+    finally:
+        session.close()
+
+    result = send_reply(
+        account_id,
+        to_email=to_email,
+        subject=subject,
+        body_text=body,
+        thread_id=thread_id,
+    )
+    status = 200 if result.get('success') else 502
+    return jsonify(result), status
 
 
 # ---- Tracking endpoints (public, no auth) ----

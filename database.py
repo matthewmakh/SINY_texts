@@ -584,6 +584,10 @@ class EmailAccount(Base):
     complaint_count_7d = Column(Integer, default=0)
     last_send_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
+    # Auto-pause guardrail: if bounce rate over the trailing window exceeds this
+    # percent (with a minimum sample), the inbox is paused automatically.
+    bounce_pause_threshold = Column(Integer, default=8)  # percent
+    auto_paused = Column(Boolean, default=False)         # True if paused by the guardrail
 
     # Reply polling (Gmail History API cursor)
     history_id = Column(String(50), nullable=True)
@@ -607,6 +611,8 @@ class EmailAccount(Base):
             'complaint_count_7d': self.complaint_count_7d,
             'last_send_at': self.last_send_at.isoformat() if self.last_send_at else None,
             'last_error': self.last_error,
+            'bounce_pause_threshold': self.bounce_pause_threshold,
+            'auto_paused': bool(self.auto_paused),
             'has_refresh_token': bool(self.refresh_token),
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
@@ -949,26 +955,33 @@ class EmailReply(Base):
     subject = Column(Text, nullable=True)
     snippet = Column(Text, nullable=True)
     body_text = Column(Text, nullable=True)
+    body_html = Column(Text, nullable=True)                 # Full HTML body when available
 
     received_at = Column(DateTime, default=datetime.utcnow)
     is_auto_reply = Column(Boolean, default=False)          # Out-of-office, bounce, etc.
     read = Column(Boolean, default=False)
+    replied_to = Column(Boolean, default=False)             # Operator answered from the app
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_body=False):
+        d = {
             'id': self.id,
             'account_id': self.account_id,
             'enrollment_id': self.enrollment_id,
             'campaign_id': self.campaign_id,
+            'gmail_thread_id': self.gmail_thread_id,
             'from_email': self.from_email,
             'from_name': self.from_name,
             'subject': self.subject,
             'snippet': self.snippet,
-            'body_text': self.body_text,
             'received_at': self.received_at.isoformat() if self.received_at else None,
             'is_auto_reply': self.is_auto_reply,
             'read': self.read,
+            'replied_to': bool(self.replied_to),
         }
+        if include_body:
+            d['body_text'] = self.body_text
+            d['body_html'] = self.body_html
+        return d
 
 
 def init_db():
@@ -1000,6 +1013,11 @@ def _run_migrations():
         ("campaigns", "response_tracking_ends_at", "TIMESTAMP"),
         ("campaign_enrollments", "response_count", "INTEGER DEFAULT 0"),
         ("campaign_enrollments", "opted_out_keyword", "VARCHAR(50)"),
+        # Email table columns added after initial email-module release
+        ("email_accounts", "bounce_pause_threshold", "INTEGER DEFAULT 8"),
+        ("email_accounts", "auto_paused", "BOOLEAN DEFAULT FALSE"),
+        ("email_replies", "body_html", "TEXT"),
+        ("email_replies", "replied_to", "BOOLEAN DEFAULT FALSE"),
     ]
     
     with engine.connect() as conn:
