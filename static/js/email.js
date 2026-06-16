@@ -324,33 +324,181 @@
   }
 
   // ============ Inbox ============
+  let currentThread = null; // { replyId, to_email, subject, thread_id }
+
   async function loadInbox() {
     const includeAuto = document.getElementById('email-include-auto').checked;
     const data = await api(`/api/email/inbox?include_auto=${includeAuto}`);
     state.inboxReplies = data.replies || [];
     const list = document.getElementById('email-inbox-list');
     if (state.inboxReplies.length === 0) {
-      list.innerHTML = '<div class="empty-state"><i class="fas fa-inbox fa-3x muted"></i><p>No replies yet. The system polls Gmail every 2 minutes.</p></div>';
+      list.innerHTML = '<div class="empty-state"><i class="fas fa-inbox fa-3x muted"></i><p>No replies yet. The system polls Gmail every 2 minutes — or hit "Check now".</p></div>';
       return;
     }
     list.innerHTML = state.inboxReplies.map(r => `
-      <div class="inbox-row ${r.read ? '' : 'unread'}" onclick="EmailModule.markRead(${r.id})">
+      <div class="inbox-row ${r.read ? '' : 'unread'}" data-reply-id="${r.id}">
         <div class="inbox-from">
           <strong>${escapeHtml(r.from_name || r.from_email)}</strong>
           <span class="muted">${escapeHtml(r.from_email)}</span>
           ${r.is_auto_reply ? '<span class="badge-auto">auto</span>' : ''}
+          ${r.replied_to ? '<span class="badge-replied">replied</span>' : ''}
         </div>
         <div class="inbox-subject">${escapeHtml(r.subject || '(no subject)')}</div>
         <div class="inbox-snippet muted">${escapeHtml(r.snippet || '')}</div>
         <div class="inbox-time muted">${fmtDate(r.received_at)}</div>
       </div>
     `).join('');
+    list.querySelectorAll('.inbox-row').forEach(row => {
+      row.addEventListener('click', () => openThread(parseInt(row.dataset.replyId, 10)));
+    });
+  }
+
+  async function openThread(replyId) {
+    const reply = state.inboxReplies.find(r => r.id === replyId);
+    currentThread = {
+      replyId,
+      to_email: reply ? reply.from_email : '',
+      subject: reply ? reply.subject : '',
+      thread_id: reply ? reply.gmail_thread_id : null,
+    };
+
+    // Mark read in the list immediately
+    const row = document.querySelector(`.inbox-row[data-reply-id="${replyId}"]`);
+    if (row) row.classList.remove('unread');
+
+    document.getElementById('email-thread-subject').textContent = (reply && reply.subject) || 'Conversation';
+    document.getElementById('email-thread-to').textContent = currentThread.to_email ? `Replying to ${currentThread.to_email}` : '';
+    document.getElementById('email-thread-reply-body').value = '';
+    document.getElementById('email-thread-reply-status').textContent = '';
+    const msgsWrap = document.getElementById('email-thread-messages');
+    msgsWrap.innerHTML = '<div class="muted">Loading conversation…</div>';
+    showModal('email-thread-modal');
+
+    // Mark read on the server (also captures full body for non-thread fallback)
+    await api(`/api/email/inbox/${replyId}/read`, { method: 'POST' });
+    updateUnreadBadge();
+
+    if (currentThread.thread_id) {
+      const t = await api(`/api/email/threads/${currentThread.thread_id}?reply_id=${replyId}`);
+      if (t.success && t.messages && t.messages.length) {
+        renderThread(t.messages);
+        return;
+      }
+    }
+    // Fallback: just show the single reply body
+    const detail = await api(`/api/email/inbox/${replyId}`);
+    if (detail.success) {
+      const r = detail.reply;
+      renderThread([{
+        from_name: r.from_name, from_email: r.from_email,
+        date: r.received_at, is_outbound: false,
+        body_html: r.body_html, body_text: r.body_text || r.snippet,
+      }]);
+    } else {
+      document.getElementById('email-thread-messages').innerHTML = '<div class="muted">Could not load the conversation.</div>';
+    }
+  }
+
+  function renderThread(messages) {
+    const wrap = document.getElementById('email-thread-messages');
+    // Build structure with placeholder slots; HTML bodies are injected into
+    // sandboxed iframes (scripts disabled) so attacker-controlled inbound
+    // email HTML cannot run scripts or steal the session.
+    wrap.innerHTML = messages.map((m, i) => {
+      const who = m.is_outbound ? 'You' : (m.from_name || m.from_email || 'Them');
+      const hasHtml = !!m.body_html;
+      const body = hasHtml
+        ? `<iframe class="thread-msg-frame" data-idx="${i}" sandbox="" referrerpolicy="no-referrer"></iframe>`
+        : `<div class="thread-msg-body thread-msg-plain">${escapeHtml(m.body_text || m.snippet || '')}</div>`;
+      return `
+        <div class="thread-msg ${m.is_outbound ? 'outbound' : 'inbound'}">
+          <div class="thread-msg-head">
+            <strong>${escapeHtml(who)}</strong>
+            <span class="muted">${escapeHtml(m.from_email || '')}</span>
+            <span class="muted thread-msg-date">${m.date ? escapeHtml(m.date) : fmtDate(m.date)}</span>
+          </div>
+          ${body}
+        </div>`;
+    }).join('');
+
+    // Inject HTML bodies into the sandboxed iframes via srcdoc property
+    wrap.querySelectorAll('.thread-msg-frame').forEach(frame => {
+      const idx = parseInt(frame.dataset.idx, 10);
+      const html = messages[idx].body_html || '';
+      // Block remote images by default would require CSP; we at least keep
+      // scripts off via the empty sandbox attribute.
+      frame.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
+        <style>body{font-family:Arial,sans-serif;font-size:13px;color:#222;margin:8px}</style>
+        </head><body>${html}</body></html>`;
+    });
+    wrap.scrollTop = wrap.scrollHeight;
+  }
+
+  async function sendThreadReply() {
+    if (!currentThread || !currentThread.replyId) return;
+    const body = document.getElementById('email-thread-reply-body').value.trim();
+    if (!body) { toast('Write a reply first', 'error'); return; }
+    const btn = document.getElementById('email-thread-send-btn');
+    const status = document.getElementById('email-thread-reply-status');
+    btn.disabled = true;
+    status.textContent = 'Sending…';
+
+    const r = await api(`/api/email/inbox/${currentThread.replyId}/reply`, {
+      method: 'POST', body: JSON.stringify({ body }),
+    });
+    btn.disabled = false;
+    if (r.success) {
+      status.textContent = 'Sent ✓';
+      toast('Reply sent', 'success');
+      document.getElementById('email-thread-reply-body').value = '';
+      // Refresh thread to show the sent message
+      if (currentThread.thread_id) {
+        const t = await api(`/api/email/threads/${currentThread.thread_id}?reply_id=${currentThread.replyId}`);
+        if (t.success) renderThread(t.messages);
+      }
+      loadInbox();
+    } else {
+      status.textContent = '';
+      toast(r.error || 'Send failed', 'error');
+    }
+  }
+
+  async function forcePollAll() {
+    const btn = document.getElementById('email-check-now-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Checking…'; }
+    // Poll each account, then refresh
+    const accts = await api('/api/email/accounts');
+    let total = 0;
+    for (const a of (accts.accounts || [])) {
+      try {
+        const r = await api(`/api/email/accounts/${a.id}/poll`, { method: 'POST' });
+        if (r.success) total += (r.new_replies || 0);
+      } catch (e) { /* keep going */ }
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync"></i> Check now'; }
+    toast(total > 0 ? `${total} new repl${total === 1 ? 'y' : 'ies'}` : 'No new replies', total > 0 ? 'success' : 'info');
+    loadInbox();
+    updateUnreadBadge();
   }
 
   async function markRead(id) {
     await api(`/api/email/inbox/${id}/read`, { method: 'POST' });
-    const row = document.querySelector(`.inbox-row[onclick*="(${id})"]`);
+    const row = document.querySelector(`.inbox-row[data-reply-id="${id}"]`);
     if (row) row.classList.remove('unread');
+  }
+
+  async function updateUnreadBadge() {
+    try {
+      const data = await api('/api/email/stats');
+      if (data.success) {
+        const badge = document.getElementById('email-unread-badge');
+        const n = data.stats?.unread_replies || 0;
+        if (badge) {
+          if (n > 0) { badge.style.display = 'inline-block'; badge.textContent = n; }
+          else { badge.style.display = 'none'; }
+        }
+      }
+    } catch {}
   }
 
   // ============ Campaign Builder ============
@@ -983,6 +1131,8 @@
     document.getElementById('connect-email-account-btn')?.addEventListener('click', connectAccount);
     document.getElementById('new-email-campaign-btn')?.addEventListener('click', newCampaign);
     document.getElementById('email-include-auto')?.addEventListener('change', loadInbox);
+    document.getElementById('email-check-now-btn')?.addEventListener('click', forcePollAll);
+    document.getElementById('email-thread-send-btn')?.addEventListener('click', sendThreadReply);
     document.getElementById('ec-add-message-btn')?.addEventListener('click', addBuilderMessage);
     document.getElementById('ec-save-btn')?.addEventListener('click', () => saveCampaign(false));
     document.getElementById('ec-launch-btn')?.addEventListener('click', () => saveCampaign(true));
@@ -1060,6 +1210,7 @@
     saveAccount,
     deleteAccount,
     markRead,
+    openThread,
     addBuilderMessage,
     removeBuilderMessage,
   };

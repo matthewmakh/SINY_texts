@@ -374,6 +374,102 @@
   margin-left: 6px;
 }
 
+.badge-replied {
+  background: #d1fae5;
+  color: #065f46;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+
+.inbox-controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+/* Thread modal */
+.thread-messages {
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.thread-msg {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: white;
+}
+
+.thread-msg.outbound {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  margin-left: 32px;
+}
+
+.thread-msg.inbound {
+  margin-right: 32px;
+}
+
+.thread-msg-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.thread-msg-date {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.thread-msg-frame {
+  width: 100%;
+  min-height: 120px;
+  border: none;
+  background: white;
+}
+
+.thread-msg-plain {
+  white-space: pre-wrap;
+  font-size: 13px;
+  color: #222;
+  line-height: 1.5;
+}
+
+.thread-reply-footer {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.thread-reply-to {
+  font-size: 12px;
+}
+
+#email-thread-reply-body {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.thread-reply-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+
 .badge-ab {
   background: #fce7f3;
   color: #9f1239;

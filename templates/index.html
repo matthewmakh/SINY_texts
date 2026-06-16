@@ -408,9 +408,12 @@
                 <div class="email-pane" id="email-pane-inbox">
                     <div class="pane-header">
                         <h3>Replies</h3>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="email-include-auto"> Include auto-replies & bounces
-                        </label>
+                        <div class="inbox-controls">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="email-include-auto"> Include auto-replies & bounces
+                            </label>
+                            <button class="btn btn-secondary btn-sm" id="email-check-now-btn"><i class="fas fa-sync"></i> Check now</button>
+                        </div>
                     </div>
                     <div id="email-inbox-list" class="email-inbox-list"></div>
                 </div>
@@ -548,6 +551,27 @@
                         <button class="btn btn-secondary" onclick="hideModal('email-campaign-modal')">Cancel</button>
                         <button class="btn btn-primary" id="ec-save-btn">Save Draft</button>
                         <button class="btn btn-success" id="ec-launch-btn">Save &amp; Launch</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inbox Thread / Reply Modal -->
+            <div class="modal" id="email-thread-modal">
+                <div class="modal-content modal-lg">
+                    <div class="modal-header">
+                        <h3 id="email-thread-subject">Conversation</h3>
+                        <button class="modal-close" onclick="hideModal('email-thread-modal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="email-thread-messages" class="thread-messages"></div>
+                    </div>
+                    <div class="modal-footer thread-reply-footer">
+                        <div class="thread-reply-to muted" id="email-thread-to"></div>
+                        <textarea id="email-thread-reply-body" rows="4" placeholder="Type your reply…"></textarea>
+                        <div class="thread-reply-actions">
+                            <span class="muted" id="email-thread-reply-status"></span>
+                            <button class="btn btn-primary" id="email-thread-send-btn"><i class="fas fa-paper-plane"></i> Send reply</button>
+                        </div>
                     </div>
                 </div>
             </div>
