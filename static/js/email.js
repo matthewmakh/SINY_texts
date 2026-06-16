@@ -250,16 +250,22 @@
           ? `<button class="btn btn-success" onclick="EmailModule.resumeCampaign(${c.id})"><i class="fas fa-play"></i> Resume</button>`
           : '';
 
+    const canComplete = c.status === 'active' || c.status === 'paused';
     detail.innerHTML = `
       <div class="campaign-detail-header">
         <button class="btn btn-link" onclick="EmailModule.loadCampaignsList()">&larr; All campaigns</button>
         <h3>${escapeHtml(c.name)} <span class="status-pill status-${c.status}">${c.status}</span></h3>
         <div class="campaign-actions">
           ${lifecycleButtons}
+          ${(c.status === 'active' || c.status === 'paused') ? `<button class="btn btn-secondary" onclick="EmailModule.openAddRecipients(${c.id})"><i class="fas fa-user-plus"></i> Add recipients</button>` : ''}
           <button class="btn btn-secondary" onclick="EmailModule.editCampaign(${c.id})"><i class="fas fa-pen"></i> Edit</button>
+          <button class="btn btn-secondary" onclick="EmailModule.duplicateCampaign(${c.id})"><i class="fas fa-copy"></i> Duplicate</button>
+          ${c.ai_personalization ? `<button class="btn btn-secondary" onclick="EmailModule.previewCampaignOpeners(${c.id})"><i class="fas fa-wand-magic-sparkles"></i> Preview openers</button>` : ''}
+          ${canComplete ? `<button class="btn btn-secondary" onclick="EmailModule.completeCampaign(${c.id})"><i class="fas fa-flag-checkered"></i> Complete</button>` : ''}
           ${c.status === 'draft' ? `<button class="btn btn-danger" onclick="EmailModule.deleteCampaign(${c.id})"><i class="fas fa-trash"></i> Delete</button>` : ''}
         </div>
       </div>
+      <div id="ec-detail-panel"></div>
 
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-info"><span class="stat-value">${s.total_enrolled || 0}</span><span class="stat-label">Enrolled</span></div></div>
@@ -788,27 +794,23 @@
       b.id = campaignId;
     }
 
-    // Sync messages (delete existing if editing, then add)
-    if (b.id) {
-      // Fetch existing for cleanup
-      const existing = (await api(`/api/email/campaigns/${campaignId}`)).campaign;
-      for (const m of (existing.messages || [])) {
-        try { await api(`/api/email/messages/${m.id}`, { method: 'DELETE' }); } catch (e) { /* may fail if sent */ }
-      }
-    }
-    for (let i = 0; i < b.messages.length; i++) {
-      const m = b.messages[i];
-      await api(`/api/email/campaigns/${campaignId}/messages`, {
-        method: 'POST',
-        body: JSON.stringify({
-          subject: m.subject,
-          body_html: m.body_html,
-          days_after_previous: i === 0 ? 0 : (m.days_after_previous || 3),
-          same_thread: m.same_thread !== false,
-          subject_variant_b: m.subject_variant_b || null,
-          sequence_order: i + 1,
-        }),
-      });
+    // Reconcile the sequence in a single diff-based call. Existing steps keep
+    // their id so the server can edit-in-place instead of delete+recreate.
+    const messagesPayload = b.messages.map((m, i) => ({
+      id: m.id || undefined,
+      subject: m.subject,
+      body_html: m.body_html,
+      days_after_previous: i === 0 ? 0 : (m.days_after_previous || 3),
+      same_thread: m.same_thread !== false,
+      subject_variant_b: m.subject_variant_b || null,
+    }));
+    const syncResp = await api(`/api/email/campaigns/${campaignId}/messages/sync`, {
+      method: 'PUT',
+      body: JSON.stringify({ messages: messagesPayload }),
+    });
+    if (syncResp.success && syncResp.result && syncResp.result.blocked && syncResp.result.blocked.length) {
+      const blocked = syncResp.result.blocked;
+      toast(`${blocked.length} step change(s) blocked: ${blocked.map(b => 'step ' + b.sequence_order + ' (' + b.reason + ')').join(', ')}`, 'error');
     }
 
     // Enroll: combine pasted + CSV contacts
@@ -884,6 +886,88 @@
     if (!confirm('Delete this campaign and all its data?')) return;
     const r = await api(`/api/email/campaigns/${id}`, { method: 'DELETE' });
     if (r.success) { toast('Deleted', 'success'); loadCampaignsList(); }
+  }
+  async function completeCampaign(id) {
+    if (!confirm('Mark this campaign complete? Remaining steps will stop sending.')) return;
+    const r = await api(`/api/email/campaigns/${id}/complete`, { method: 'POST' });
+    if (r.success) { toast('Campaign completed', 'success'); openCampaign(id); }
+    else toast(r.error || 'Failed', 'error');
+  }
+  async function duplicateCampaign(id) {
+    const r = await api(`/api/email/campaigns/${id}/duplicate`, { method: 'POST' });
+    if (r.success) {
+      toast('Duplicated as draft — opening copy', 'success');
+      openCampaign(r.campaign.id);
+    } else toast(r.error || 'Failed', 'error');
+  }
+
+  // Inline "add recipients to a running campaign" panel
+  function openAddRecipients(id) {
+    const panel = document.getElementById('ec-detail-panel');
+    if (!panel) return;
+    panel.innerHTML = `
+      <div class="card add-recipients-panel">
+        <h4>Add recipients to this campaign</h4>
+        <p class="muted">New contacts enter at step 1 and flow through the sequence. Duplicates and unsubscribes are skipped automatically.</p>
+        <textarea id="ar-paste" rows="4" placeholder="One per line, optionally: email,name,company"></textarea>
+        <div class="add-recipients-actions">
+          <button class="btn btn-secondary btn-sm" onclick="EmailModule.addRecipientsFromLeads(${id})"><i class="fas fa-database"></i> Pull from leads DB</button>
+          <button class="btn btn-primary btn-sm" onclick="EmailModule.submitAddRecipients(${id})">Add pasted contacts</button>
+          <button class="btn btn-link btn-sm" onclick="document.getElementById('ec-detail-panel').innerHTML=''">Close</button>
+        </div>
+        <div id="ar-feedback" class="muted"></div>
+      </div>`;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  async function submitAddRecipients(id) {
+    const text = document.getElementById('ar-paste').value;
+    const contacts = parsePastedEmails(text);
+    if (contacts.length === 0) { toast('No valid emails pasted', 'error'); return; }
+    const r = await api(`/api/email/campaigns/${id}/enroll`, {
+      method: 'POST', body: JSON.stringify({ contacts }),
+    });
+    showAddRecipientFeedback(r);
+  }
+  async function addRecipientsFromLeads(id) {
+    const r = await api(`/api/email/campaigns/${id}/enroll`, {
+      method: 'POST', body: JSON.stringify({ use_filters: true }),
+    });
+    showAddRecipientFeedback(r);
+  }
+  function showAddRecipientFeedback(r) {
+    const fb = document.getElementById('ar-feedback');
+    if (!r.success) { if (fb) fb.textContent = r.error || 'Failed'; toast(r.error || 'Failed', 'error'); return; }
+    const s = r.stats || {};
+    if (fb) {
+      fb.className = 'enrollment-feedback';
+      fb.innerHTML = `<strong>${s.enrolled || r.enrolled} added</strong>${s.enriched_count ? ` · ${s.enriched_count} enriched` : ''}${(s.skipped_duplicate + s.skipped_unsubscribed + s.skipped_invalid) ? ` · ${(s.skipped_duplicate||0)+(s.skipped_unsubscribed||0)+(s.skipped_invalid||0)} skipped` : ''}`;
+    }
+    toast(`Added ${s.enrolled || r.enrolled} recipients`, 'success');
+  }
+
+  // Batch opener preview — shows real openers for enrolled contacts
+  async function previewCampaignOpeners(id) {
+    const panel = document.getElementById('ec-detail-panel');
+    if (!panel) return;
+    panel.innerHTML = '<div class="card"><div class="muted">Generating sample openers…</div></div>';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const r = await api(`/api/email/campaigns/${id}/preview-openers`, {
+      method: 'POST', body: JSON.stringify({ n: 5 }),
+    });
+    if (!r.success) {
+      panel.innerHTML = `<div class="card ai-preview-result empty">${escapeHtml(r.error || 'Failed')}</div>`;
+      return;
+    }
+    panel.innerHTML = `
+      <div class="card">
+        <h4>Sample AI openers <button class="btn btn-link btn-sm" onclick="document.getElementById('ec-detail-panel').innerHTML=''">Close</button></h4>
+        ${r.previews.map(p => `
+          <div class="opener-sample">
+            <div class="opener-sample-to">${escapeHtml(p.name || p.email)} <span class="muted">${escapeHtml(p.email)}</span></div>
+            ${p.opener ? `<div class="opener-sample-text">"${escapeHtml(p.opener)}"</div>` : '<div class="muted">⚠ empty — too little context, {ai_first_line} will be blank</div>'}
+          </div>
+        `).join('')}
+      </div>`;
   }
 
   // ============ Event wiring ============
@@ -967,6 +1051,12 @@
     startCampaign,
     pauseCampaign,
     resumeCampaign,
+    completeCampaign,
+    duplicateCampaign,
+    openAddRecipients,
+    submitAddRecipients,
+    addRecipientsFromLeads,
+    previewCampaignOpeners,
     saveAccount,
     deleteAccount,
     markRead,

@@ -1554,6 +1554,34 @@ def delete_email_message(message_id):
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
+@app.route('/api/email/campaigns/<int:campaign_id>/messages/sync', methods=['PUT'])
+@login_required
+def sync_email_messages(campaign_id):
+    """
+    Reconcile the full sequence in one call (diff-based). Body:
+      {"messages": [{"id": 12, "subject": ..., "body_html": ...}, {new step...}]}
+    Returns what changed and any structural edits that were blocked.
+    """
+    data = request.json or {}
+    messages = data.get('messages', [])
+    result = email_campaign_service.sync_messages(campaign_id, messages)
+    if result is None:
+        return jsonify({'success': False, 'error': 'Campaign not found'}), 404
+    return jsonify({'success': True, 'result': result})
+
+
+@app.route('/api/email/campaigns/<int:campaign_id>/duplicate', methods=['POST'])
+@login_required
+def duplicate_email_campaign(campaign_id):
+    """Clone a campaign's settings + sequence into a new draft."""
+    from flask import g
+    created_by = getattr(g, 'current_user', {}).get('id') if hasattr(g, 'current_user') else None
+    clone = email_campaign_service.duplicate_campaign(campaign_id, created_by=created_by)
+    if not clone:
+        return jsonify({'success': False, 'error': 'Campaign not found'}), 404
+    return jsonify({'success': True, 'campaign': clone})
+
+
 @app.route('/api/email/campaigns/<int:campaign_id>/enroll', methods=['POST'])
 @login_required
 def enroll_email_contacts(campaign_id):

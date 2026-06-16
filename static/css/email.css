@@ -702,6 +702,47 @@
   margin-left: 12px;
 }
 
+/* Add-recipients inline panel */
+.add-recipients-panel textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  margin-bottom: 10px;
+}
+
+.add-recipients-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Batch opener samples */
+.opener-sample {
+  padding: 10px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.opener-sample:last-child {
+  border-bottom: none;
+}
+
+.opener-sample-to {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.opener-sample-text {
+  font-style: italic;
+  color: #4338ca;
+  font-size: 14px;
+}
+
 .account-picker {
   display: flex;
   flex-direction: column;

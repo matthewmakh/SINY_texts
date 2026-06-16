@@ -190,6 +190,168 @@ class EmailCampaignService:
                 msg.sequence_order = i
             return True
 
+    def sync_messages(self, campaign_id: int, messages: List[dict]) -> Optional[dict]:
+        """
+        Reconcile a campaign's sequence against the full ordered list supplied by
+        the builder, instead of the old blind delete-all-and-recreate.
+
+        Each incoming message may carry an 'id' (existing step) or not (new step).
+
+        Rules:
+          - DRAFT campaign: full freedom — update, create, delete, reorder.
+          - ACTIVE/PAUSED/COMPLETED campaign (locked): content edits to existing
+            steps are allowed; new steps may be APPENDED to the end; existing
+            steps cannot be deleted or reordered. Anything blocked is reported.
+
+        Returns {created, updated, deleted, blocked: [{id, reason}]}.
+        """
+        with get_db_session() as session:
+            campaign = session.query(EmailCampaign).filter(EmailCampaign.id == campaign_id).first()
+            if not campaign:
+                return None
+
+            locked = campaign.status != CampaignStatus.DRAFT.value
+
+            existing = session.query(EmailCampaignMessage).filter(
+                EmailCampaignMessage.campaign_id == campaign_id
+            ).order_by(EmailCampaignMessage.sequence_order).all()
+            existing_by_id = {m.id: m for m in existing}
+            incoming_ids = {m.get('id') for m in messages if m.get('id')}
+
+            result = {'created': 0, 'updated': 0, 'deleted': 0, 'blocked': []}
+
+            def _apply_content(m, spec):
+                m.subject = spec.get('subject', m.subject)
+                m.body_html = spec.get('body_html', m.body_html)
+                m.body_text = spec.get('body_text', m.body_text)
+                m.preheader = spec.get('preheader', m.preheader)
+                m.subject_variant_b = spec.get('subject_variant_b') or None
+                m.has_ab_test = bool(m.subject_variant_b)
+
+            # 1. Deletions — existing steps no longer present in the incoming list
+            for m in existing:
+                if m.id in incoming_ids:
+                    continue
+                has_sends = session.query(EmailSend).filter(
+                    EmailSend.message_id == m.id
+                ).count() > 0
+                if locked or has_sends:
+                    result['blocked'].append({
+                        'id': m.id,
+                        'sequence_order': m.sequence_order,
+                        'reason': 'already sent' if has_sends else 'campaign not in draft',
+                    })
+                else:
+                    session.delete(m)
+                    result['deleted'] += 1
+
+            # 2. Upserts
+            if locked:
+                # Keep existing ordering untouched; only edit content + append new steps
+                max_order = max([m.sequence_order for m in existing], default=0)
+                next_order = max_order + 1
+                for spec in messages:
+                    mid = spec.get('id')
+                    if mid and mid in existing_by_id:
+                        _apply_content(existing_by_id[mid], spec)
+                        result['updated'] += 1
+                    elif not mid:
+                        new = EmailCampaignMessage(
+                            campaign_id=campaign_id,
+                            sequence_order=next_order,
+                            subject=spec.get('subject', ''),
+                            body_html=spec.get('body_html', ''),
+                            body_text=spec.get('body_text'),
+                            preheader=spec.get('preheader'),
+                            days_after_previous=spec.get('days_after_previous', 3),
+                            same_thread=spec.get('same_thread', True),
+                            subject_variant_b=spec.get('subject_variant_b') or None,
+                            has_ab_test=bool(spec.get('subject_variant_b')),
+                        )
+                        session.add(new)
+                        next_order += 1
+                        result['created'] += 1
+                    # else: incoming id that doesn't exist (stale) — ignore
+            else:
+                order = 1
+                for spec in messages:
+                    mid = spec.get('id')
+                    if mid and mid in existing_by_id:
+                        m = existing_by_id[mid]
+                        _apply_content(m, spec)
+                        m.days_after_previous = spec.get('days_after_previous', m.days_after_previous)
+                        m.same_thread = spec.get('same_thread', m.same_thread)
+                        m.sequence_order = order
+                        result['updated'] += 1
+                    else:
+                        new = EmailCampaignMessage(
+                            campaign_id=campaign_id,
+                            sequence_order=order,
+                            subject=spec.get('subject', ''),
+                            body_html=spec.get('body_html', ''),
+                            body_text=spec.get('body_text'),
+                            preheader=spec.get('preheader'),
+                            days_after_previous=(0 if order == 1 else spec.get('days_after_previous', 3)),
+                            same_thread=spec.get('same_thread', True),
+                            subject_variant_b=spec.get('subject_variant_b') or None,
+                            has_ab_test=bool(spec.get('subject_variant_b')),
+                        )
+                        session.add(new)
+                        result['created'] += 1
+                    order += 1
+
+            return result
+
+    def duplicate_campaign(self, campaign_id: int, created_by: int = None) -> Optional[dict]:
+        """
+        Clone a campaign's settings + sequence into a new DRAFT campaign.
+        Does NOT copy enrollments, sends, or sending state.
+        """
+        with get_db_session() as session:
+            src = session.query(EmailCampaign).filter(EmailCampaign.id == campaign_id).first()
+            if not src:
+                return None
+
+            clone = EmailCampaign(
+                name=f"{src.name} (copy)",
+                description=src.description,
+                status=CampaignStatus.DRAFT.value,
+                enrollment_type=src.enrollment_type,
+                filter_criteria=src.filter_criteria,
+                send_window_start=src.send_window_start,
+                send_window_end=src.send_window_end,
+                send_days=src.send_days,
+                timezone=src.timezone,
+                sending_account_ids=src.sending_account_ids,
+                rotation_strategy=src.rotation_strategy,
+                ai_personalization=src.ai_personalization,
+                ai_prompt=src.ai_prompt,
+                track_opens=src.track_opens,
+                track_clicks=src.track_clicks,
+                created_by=created_by,
+            )
+            session.add(clone)
+            session.flush()
+
+            src_messages = session.query(EmailCampaignMessage).filter(
+                EmailCampaignMessage.campaign_id == campaign_id
+            ).order_by(EmailCampaignMessage.sequence_order).all()
+            for m in src_messages:
+                session.add(EmailCampaignMessage(
+                    campaign_id=clone.id,
+                    sequence_order=m.sequence_order,
+                    subject=m.subject,
+                    preheader=m.preheader,
+                    body_html=m.body_html,
+                    body_text=m.body_text,
+                    days_after_previous=m.days_after_previous,
+                    same_thread=m.same_thread,
+                    has_ab_test=m.has_ab_test,
+                    subject_variant_b=m.subject_variant_b,
+                ))
+
+            return clone.to_dict()
+
     # ---------------------- ENROLLMENT ----------------------
 
     def enroll_contacts(self, campaign_id: int, contacts: List[dict],
