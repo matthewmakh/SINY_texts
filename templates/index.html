@@ -457,13 +457,24 @@
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label>Send Window Start (ET)</label>
+                                    <label>Send Window Start</label>
                                     <input type="time" id="ec-window-start" value="09:00">
                                 </div>
                                 <div class="form-group">
-                                    <label>Send Window End (ET)</label>
+                                    <label>Send Window End</label>
                                     <input type="time" id="ec-window-end" value="17:00">
                                 </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Timezone</label>
+                                <select id="ec-timezone">
+                                    <option value="America/New_York">Eastern (New York)</option>
+                                    <option value="America/Chicago">Central (Chicago)</option>
+                                    <option value="America/Denver">Mountain (Denver)</option>
+                                    <option value="America/Los_Angeles">Pacific (Los Angeles)</option>
+                                    <option value="America/Phoenix">Arizona (no DST)</option>
+                                    <option value="UTC">UTC</option>
+                                </select>
                             </div>
                             <div class="form-group">
                                 <label>Send Days</label>

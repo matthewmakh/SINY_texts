@@ -1362,12 +1362,39 @@ def list_email_accounts():
 @app.route('/api/email/accounts/<int:account_id>', methods=['DELETE'])
 @login_required
 def delete_email_account(account_id):
-    """Disconnect a mailbox."""
+    """
+    Disconnect a mailbox. Guarded: refuses if a live (active/paused) campaign
+    still lists this account as a sender, unless ?force=true is passed.
+    """
+    force = request.args.get('force', 'false').lower() == 'true'
     session = get_session()
     try:
         a = session.query(EmailAccount).filter(EmailAccount.id == account_id).first()
         if not a:
             return jsonify({'success': False, 'error': 'Not found'}), 404
+
+        if not force:
+            live = session.query(EmailCampaign).filter(
+                EmailCampaign.status.in_(['active', 'paused'])
+            ).all()
+            dependent = []
+            for camp in live:
+                try:
+                    ids = json.loads(camp.sending_account_ids) if camp.sending_account_ids else []
+                except Exception:
+                    ids = []
+                if account_id in ids:
+                    dependent.append(camp.name)
+            if dependent:
+                return jsonify({
+                    'success': False,
+                    'requires_force': True,
+                    'error': f"This mailbox is still used by {len(dependent)} live campaign(s): "
+                             f"{', '.join(dependent[:5])}. Disconnecting it removes it from their "
+                             f"send pool. Pass force to proceed.",
+                    'dependent_campaigns': dependent,
+                }), 409
+
         session.delete(a)
         session.commit()
         return jsonify({'success': True})
@@ -1378,16 +1405,21 @@ def delete_email_account(account_id):
 @app.route('/api/email/accounts/<int:account_id>', methods=['PUT'])
 @login_required
 def update_email_account(account_id):
-    """Update sending policy (daily cap, jitter, status) on an account."""
+    """Update sending policy (daily cap, jitter, bounce threshold, status)."""
     data = request.json or {}
     session = get_session()
     try:
         a = session.query(EmailAccount).filter(EmailAccount.id == account_id).first()
         if not a:
             return jsonify({'success': False, 'error': 'Not found'}), 404
-        for f in ('daily_cap', 'min_delay_seconds', 'max_delay_seconds', 'display_name', 'status'):
+        for f in ('daily_cap', 'min_delay_seconds', 'max_delay_seconds',
+                  'display_name', 'status', 'bounce_pause_threshold'):
             if f in data:
                 setattr(a, f, data[f])
+        # Reactivating a mailbox clears the auto-pause flag and its error note
+        if data.get('status') == 'active':
+            a.auto_paused = False
+            a.last_error = None
         session.commit()
         return jsonify({'success': True, 'account': a.to_dict()})
     finally:
@@ -1477,6 +1509,7 @@ def create_email_campaign():
         send_window_start=data.get('send_window_start', '09:00'),
         send_window_end=data.get('send_window_end', '17:00'),
         send_days=data.get('send_days', 'mon,tue,wed,thu,fri'),
+        timezone=data.get('timezone', 'America/New_York'),
         sending_account_ids=data.get('sending_account_ids'),
         rotation_strategy=data.get('rotation_strategy', 'round_robin'),
         ai_personalization=bool(data.get('ai_personalization')),

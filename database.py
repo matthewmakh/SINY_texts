@@ -774,6 +774,38 @@ class EmailCampaignMessage(Base):
                 'open_rate': round((opens / sent * 100), 1) if sent else 0,
                 'reply_rate': round((replies / sent * 100), 1) if sent else 0,
             }
+            # A/B subject-line breakdown (only meaningful when a test is configured)
+            if self.has_ab_test:
+                def _variant_stats(v):
+                    vs = [s for s in self.sends if s.ab_variant == v]
+                    n = len(vs)
+                    o = sum(1 for s in vs if s.opened_at)
+                    r = sum(1 for s in vs if s.replied_at)
+                    return {
+                        'sent': n,
+                        'opens': o,
+                        'replies': r,
+                        'open_rate': round((o / n * 100), 1) if n else 0,
+                        'reply_rate': round((r / n * 100), 1) if n else 0,
+                    }
+                a = _variant_stats('A')
+                b = _variant_stats('B')
+                # Declare a winner only with a minimum sample on each side
+                winner = None
+                if a['sent'] >= 10 and b['sent'] >= 10:
+                    if a['reply_rate'] > b['reply_rate']:
+                        winner = 'A'
+                    elif b['reply_rate'] > a['reply_rate']:
+                        winner = 'B'
+                    else:
+                        winner = 'tie'
+                result['ab_stats'] = {
+                    'subject_a': self.subject,
+                    'subject_b': self.subject_variant_b,
+                    'variant_a': a,
+                    'variant_b': b,
+                    'winner': winner,
+                }
         return result
 
 

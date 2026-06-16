@@ -39,6 +39,7 @@ class EmailCampaignService:
                         send_window_start: str = '09:00',
                         send_window_end: str = '17:00',
                         send_days: str = 'mon,tue,wed,thu,fri',
+                        timezone: str = 'America/New_York',
                         sending_account_ids: list = None,
                         rotation_strategy: str = 'round_robin',
                         ai_personalization: bool = False,
@@ -56,6 +57,7 @@ class EmailCampaignService:
                 send_window_start=send_window_start,
                 send_window_end=send_window_end,
                 send_days=send_days,
+                timezone=timezone or 'America/New_York',
                 sending_account_ids=json.dumps(sending_account_ids) if sending_account_ids else None,
                 rotation_strategy=rotation_strategy,
                 ai_personalization=ai_personalization,
@@ -104,7 +106,7 @@ class EmailCampaignService:
             if not c:
                 return None
             allowed = ['name', 'description', 'enrollment_type', 'filter_criteria',
-                       'send_window_start', 'send_window_end', 'send_days',
+                       'send_window_start', 'send_window_end', 'send_days', 'timezone',
                        'sending_account_ids', 'rotation_strategy',
                        'ai_personalization', 'ai_prompt',
                        'track_opens', 'track_clicks']

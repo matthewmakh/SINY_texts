@@ -478,6 +478,61 @@
   border-radius: 4px;
 }
 
+/* A/B results */
+.ab-results {
+  margin-top: 8px;
+  padding: 10px;
+  background: #fdf2f8;
+  border: 1px solid #fbcfe8;
+  border-radius: 6px;
+}
+
+.ab-results-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9f1239;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ab-winner {
+  font-weight: 700;
+  color: #065f46;
+}
+
+.ab-variant {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 12px;
+  border-top: 1px solid #fbcfe8;
+}
+
+.ab-variant-win {
+  background: rgba(16, 185, 129, 0.08);
+  border-radius: 4px;
+}
+
+.ab-variant-label {
+  font-weight: 600;
+}
+
+.ab-variant-subject {
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ab-variant-nums {
+  white-space: nowrap;
+  color: #6b7280;
+}
+
 .badge-new {
   background: linear-gradient(135deg, #6366f1, #8b5cf6);
   color: white;

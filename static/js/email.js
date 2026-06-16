@@ -138,7 +138,7 @@
             <div class="account-email-large"><i class="fab fa-google"></i> ${escapeHtml(a.email)}</div>
             <div class="muted">${escapeHtml(a.display_name || '')}</div>
           </div>
-          <span class="status-pill status-${a.status}">${a.status}</span>
+          <span class="status-pill status-${a.status}">${a.auto_paused ? 'auto-paused' : a.status}</span>
         </div>
         <div class="account-card-body">
           <div class="account-stat"><span class="muted">Sends today</span><strong>${a.sends_today} / ${a.daily_cap}</strong></div>
@@ -149,12 +149,20 @@
           <label>Daily cap: <input type="number" min="1" max="500" value="${a.daily_cap}" data-field="daily_cap"></label>
           <label>Jitter min (s): <input type="number" min="1" value="${a.min_delay_seconds}" data-field="min_delay_seconds"></label>
           <label>Jitter max (s): <input type="number" min="1" value="${a.max_delay_seconds}" data-field="max_delay_seconds"></label>
+          <label title="Auto-pause this inbox if its 7-day bounce rate exceeds this percent">Auto-pause at bounce %: <input type="number" min="1" max="100" value="${a.bounce_pause_threshold || 8}" data-field="bounce_pause_threshold"></label>
           <button class="btn btn-sm btn-secondary" onclick="EmailModule.saveAccount(${a.id})">Save</button>
+          ${(a.status !== 'active') ? `<button class="btn btn-sm btn-success" onclick="EmailModule.reactivateAccount(${a.id})">Reactivate</button>` : ''}
           <button class="btn btn-sm btn-danger" onclick="EmailModule.deleteAccount(${a.id})">Disconnect</button>
         </div>
-        ${a.last_error ? `<div class="account-error">${escapeHtml(a.last_error)}</div>` : ''}
+        ${a.auto_paused ? `<div class="account-error"><i class="fas fa-triangle-exclamation"></i> ${escapeHtml(a.last_error || 'Auto-paused by bounce guardrail')}</div>` : (a.last_error ? `<div class="account-error">${escapeHtml(a.last_error)}</div>` : '')}
       </div>
     `).join('');
+  }
+
+  async function reactivateAccount(id) {
+    const r = await api(`/api/email/accounts/${id}`, { method: 'PUT', body: JSON.stringify({ status: 'active' }) });
+    if (r.success) { toast('Reactivated', 'success'); loadAccounts(); }
+    else toast(r.error || 'Failed', 'error');
   }
 
   async function connectAccount() {
@@ -189,11 +197,21 @@
   }
 
   async function deleteAccount(id) {
-    if (!confirm('Disconnect this mailbox? Active campaigns using it will lose this sender.')) return;
-    const r = await api(`/api/email/accounts/${id}`, { method: 'DELETE' });
+    if (!confirm('Disconnect this mailbox?')) return;
+    let r = await api(`/api/email/accounts/${id}`, { method: 'DELETE' });
+    if (!r.success && r.requires_force) {
+      // Server refused because live campaigns depend on this inbox
+      if (confirm(r.error + '\n\nDisconnect anyway?')) {
+        r = await api(`/api/email/accounts/${id}?force=true`, { method: 'DELETE' });
+      } else {
+        return;
+      }
+    }
     if (r.success) {
       toast('Disconnected', 'success');
       loadAccounts();
+    } else {
+      toast(r.error || 'Failed', 'error');
     }
   }
 
@@ -230,6 +248,36 @@
         </div>
       `;
     }).join('');
+  }
+
+  // Human-readable progress for an enrollment
+  function stepLabel(e, totalSteps) {
+    if (e.status === 'unsubscribed') return 'Unsubscribed';
+    if (e.status === 'bounced') return 'Bounced';
+    if (e.first_reply_at) return `Replied (step ${e.current_step})`;
+    if (e.status === 'completed') return 'Done';
+    if (!e.current_step || e.current_step === 0) return 'Not started';
+    return `Step ${e.current_step} of ${totalSteps}`;
+  }
+
+  // A/B subject-line results block
+  function renderAbStats(ab) {
+    const a = ab.variant_a, b = ab.variant_b;
+    const winnerNote = ab.winner === 'tie' ? '<span class="ab-winner">Tie so far</span>'
+      : ab.winner ? `<span class="ab-winner">Winner: ${ab.winner} (by reply rate)</span>`
+      : '<span class="muted">Need ≥10 sends per variant to call a winner</span>';
+    const row = (label, subject, v, isWinner) => `
+      <div class="ab-variant ${isWinner ? 'ab-variant-win' : ''}">
+        <div class="ab-variant-label">${label}${isWinner ? ' 🏆' : ''}</div>
+        <div class="ab-variant-subject">${escapeHtml(subject || '(none)')}</div>
+        <div class="ab-variant-nums">${v.sent} sent · ${v.open_rate}% opens · <strong>${v.reply_rate}% replies</strong></div>
+      </div>`;
+    return `
+      <div class="ab-results">
+        <div class="ab-results-head">A/B subject test ${winnerNote}</div>
+        ${row('Variant A', ab.subject_a, a, ab.winner === 'A')}
+        ${row('Variant B', ab.subject_b, b, ab.winner === 'B')}
+      </div>`;
   }
 
   async function openCampaign(id) {
@@ -285,6 +333,7 @@
               <div><strong>${escapeHtml(m.subject)}</strong>${m.has_ab_test ? ' <span class="badge-ab">A/B</span>' : ''}</div>
               <div class="muted">${m.days_after_previous === 0 ? 'Sent immediately' : `+${m.days_after_previous} days after previous`}${m.same_thread ? ' · same thread' : ''}</div>
               ${m.stats ? `<div class="muted">${m.stats.sent || 0} sent · ${m.stats.open_rate || 0}% opens · ${m.stats.reply_rate || 0}% replies</div>` : ''}
+              ${m.ab_stats ? renderAbStats(m.ab_stats) : ''}
             </div>
           </div>
         `).join('')}
@@ -297,6 +346,7 @@
     `;
 
     // Load enrollments
+    const totalSteps = (c.messages || []).length;
     const en = await api(`/api/email/campaigns/${id}/enrollments?limit=50`);
     const tbl = document.getElementById('ec-enrollment-table');
     if (!en.enrollments || en.enrollments.length === 0) {
@@ -310,7 +360,7 @@
             <tr>
               <td>${escapeHtml(e.email)}</td>
               <td>${escapeHtml(e.name || '')}</td>
-              <td>${e.current_step}</td>
+              <td>${stepLabel(e, totalSteps)}</td>
               <td><span class="status-pill status-${e.status}">${e.status}</span></td>
               <td>${fmtDate(e.last_sent_at)}</td>
               <td>${e.first_reply_at ? '💬 replied ' : ''}${e.open_count > 0 ? `👁 ${e.open_count} ` : ''}${e.click_count > 0 ? `🖱 ${e.click_count}` : ''}</td>
@@ -535,6 +585,7 @@
     document.getElementById('ec-description').value = b.description || '';
     document.getElementById('ec-window-start').value = b.send_window_start || '09:00';
     document.getElementById('ec-window-end').value = b.send_window_end || '17:00';
+    document.getElementById('ec-timezone').value = b.timezone || 'America/New_York';
     document.getElementById('ec-ai-toggle').checked = !!b.ai_personalization;
     document.getElementById('ec-ai-prompt').value = b.ai_prompt || '';
     document.getElementById('ec-ai-prompt-wrap').style.display = b.ai_personalization ? 'block' : 'none';
@@ -678,6 +729,7 @@
     b.description = document.getElementById('ec-description').value;
     b.send_window_start = document.getElementById('ec-window-start').value;
     b.send_window_end = document.getElementById('ec-window-end').value;
+    b.timezone = document.getElementById('ec-timezone').value;
     b.ai_personalization = document.getElementById('ec-ai-toggle').checked;
     b.ai_prompt = document.getElementById('ec-ai-prompt').value;
     b.track_opens = document.getElementById('ec-track-opens').checked;
@@ -924,6 +976,7 @@
       description: b.description,
       send_window_start: b.send_window_start,
       send_window_end: b.send_window_end,
+      timezone: b.timezone,
       send_days: b.send_days,
       sending_account_ids: b.sending_account_ids,
       ai_personalization: b.ai_personalization,
@@ -1209,6 +1262,7 @@
     previewCampaignOpeners,
     saveAccount,
     deleteAccount,
+    reactivateAccount,
     markRead,
     openThread,
     addBuilderMessage,
